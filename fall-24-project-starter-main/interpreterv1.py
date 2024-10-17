@@ -62,16 +62,16 @@ class Interpreter (InterpreterBase):
         ast = parse_program(program)
 
         #interpreter creates any data structures it needs to track things like variables...?
-
+        self.variables = {} #map to keep track of variables and their value
+        
         #then we can traverse the list
 
         #top level/root node is program node, first/only element in its dict points to the single function node -- main
-        function_node = ast.get('functions')[0]
+        main_function_node = ast.get('functions')[0]
         #error catching if program doesn't have main function defined, must generate an error of type ErrorType.NAME_ERROR
-        if function_node.dict('name')[0] == 'main':
-            main_function_node = function_node
-        else:
-            super().error(ErrorType.NAME_ERROR, "No main() function was found")
+        if main_function_node is None:
+            super().error(ErrorType.NAME_ERROR, "No main() function was found",)
+
         
         #each function node has a field that holds the functions name and another field that holds a list of statement nodes representing statements that must be run when this function is called
         #statement nodes(category, relevant fields - name, expression), variable nodes(name), value nodes(int or string value), expression nodes(binary operator; two fields for two operands)
@@ -85,16 +85,18 @@ class Interpreter (InterpreterBase):
     def run_statements(self, statements):
         for statement in statements:
             #if variable definition
-            if statement.elem_type == "vardef":
-                return self.variable_definition(statement)     
+            if statement.elem_type == 'vardef':
+                self.variable_definition(statement)     
 
             #if assignment
-            elif statement.elem_type == "=":
-                return self.do_assignment(statement)
+            elif statement.elem_type == '=':
+                self.do_assignment(statement)
 
             #if function call
-            elif statement.elem_type == "fcall":
-                return self.function_call(statement)
+            elif statement.elem_type == 'fcall':
+                self.function_call(statement)
+            else:
+                #error??????
             
 
     
@@ -102,35 +104,108 @@ class Interpreter (InterpreterBase):
         #define variable
         #each variable has a field that specifies the name of the variable
         #there is one key, name, that maps to a string holding the name of the variable to be defined
-        name = self.dict(0)
+        var_name = statement.get('name')
+        #error if variable being defined has already been defined
+        if var_name in self.variables:
+            super().error(ErrorType.NAME_ERROR, "Variable already defined",)
 
+        #add variable to main function's environment and give initial type/value
+        self.variables[var_name] = None #initial type doesn't matter -- just assign None
 
-    
+        
     
     
     def do_assignment(self, statement):
+        var_name = statement.get('name')
+        if var_name not in self.variables:
+            super().error(ErrorType.NAME_ERROR, "Can't assign a non-defined variable to an expression",)
         
-        #there should also be a field for the expression, mapping to the expression node
+        expression_node = statement.get('expression')
+
+        thing_to_be_assigned = solve_expression(expression_node)
+
+        self.variables[var_name] = thing_to_be_assigned
+        
+
+
+    def solve_expression(self, node):
+        node_type = node.elem_type
+         
+        #expression- binary operation
+        if node_type == '+' or node_type == '-':
+            op1 = self.solve_expression(node.get('op1'))
+            op2 = self.solve_expression(node.get('op2'))
+
+
+            #syntax for checking both operands are integers from chatgpt
+            if not isinstance(op1, int) or not isinstance(op2, int):
+                super().error(ErrorType.TYPE_ERROR, "Operators must be integers")
+
+            if node_type == '+':
+                return op1 + op2
+            else:
+                return op1 - op2            
+            
+        #variable
+        elif node_type == 'var':
+            return node.get('name')
+
+        #value
+        elif node_type == 'int' or node_type == 'string':
+            return node.get('val')
+        
+        #expression - function call (the only valid function call in expressions is inputi, not print)
+        elif node_type == 'fcall':
+            function_name = node.get('name')
+            if function_name == 'inputi':
+                return self.do_inputi(node)
+            else:
+                super().error(ErrorType.NAME_ERROR, "only inputi is valid function call!")
+        
+        else:
+            super().error(ErrorType.TYPE_ERROR, "not one of the valid expressions")
+        
 
     
-        def function_call(self, statement):
+    def function_call(self, statement):
+        #get name of function: ex. 'inputi'
+        function_name = statement.get('name')
+
+        if function_name == 'inputi':
+            return self.do_inputi(statement)
+        elif function_name == 'print':
+            return self.do_print(statement) #?
+        else:
+            #error
+            super().error(ErrorType.NAME_ERROR) #check this????
+
+
+
+    def do_inputi(self, node):
+        #inputi
+        arguments = node.get('args') #list containing 0+ expressoin, var, or value nodes that represent arguments
+
+        #either 0 or 1 parameter
+
+        #if 1 parameter, it is of type string. need to output prompt
+        if len(arguments) == 1:
+            super().output(self.solve_expression(arguments[0])) #have to evaluate/solve prompt first
+            #maybe have to edit to do error checking that the prompt is a string (not relevant for v1??)
+
+        #if more than one parameter, must generate error name error
+        elif len(arguments) > 1:
+            super().error(ErrorType.NAME_ERROR, f"No inputi() function found that takes >1 parameter",)
+
+        #to get user input:
+        user_input = super().get_input() #any error handling here??
+        return int(user_input)
+
+
+
+        
 
     
-            def do_assignment(self, statement):
-
-
-                def solve_expression(self):
-
-    
 
 
 
     
-
-
-
-
-
-
-
-
