@@ -34,15 +34,10 @@ High level features:
         *ErrorType.NAME_ERROR if expression refers to a variable that has not yet been defined
     To evaluate expressions, use post-order tree traversal
 
-
-- Constants
-    Integers/strings enclosed in double quotes
-
 - Variables
     - Must always be defined with a "var" statement before assignment/usage
     *ErrorType.NAME_ERROR if not
     - not of fixed type
-    
 
 '''
 
@@ -61,15 +56,13 @@ class Interpreter (InterpreterBase):
         #uses the parser to parse the program source code, and then process the nodes of the AST to run the program
         ast = parse_program(program)
 
-        #interpreter creates any data structures it needs to track things like variables...?
+        #interpreter creates any data structures it needs to track things like variables..
         self.variables = {} #map to keep track of variables and their value
-        
-        #then we can traverse the list
 
         #top level/root node is program node, first/only element in its dict points to the single function node -- main
         main_function_node = ast.get('functions')[0]
         #error catching if program doesn't have main function defined, must generate an error of type ErrorType.NAME_ERROR
-        if main_function_node is None:
+        if main_function_node.get('name') != 'main':
             super().error(ErrorType.NAME_ERROR, "No main() function was found",)
 
         
@@ -96,7 +89,7 @@ class Interpreter (InterpreterBase):
             elif statement.elem_type == 'fcall':
                 self.function_call(statement)
             else:
-                #error??????
+                #not valid statement
                 super().error(ErrorType.NAME_ERROR, "Not a valid statement",)
             
 
@@ -118,13 +111,12 @@ class Interpreter (InterpreterBase):
     
     def do_assignment(self, statement):
         var_name = statement.get('name')
+        # Error check: that variable is defined
         if var_name not in self.variables:
             super().error(ErrorType.NAME_ERROR, "Can't assign a non-defined variable to an expression",)
         
         expression_node = statement.get('expression')
-
         thing_to_be_assigned = self.solve_expression(expression_node)
-
         self.variables[var_name] = thing_to_be_assigned
         
 
@@ -147,7 +139,7 @@ class Interpreter (InterpreterBase):
         elif node_type == 'int' or node_type == 'string':
             return node.get('val')
         
-        #expression - function call (the only valid function call in expressions is inputi, not print)
+        #expression - function call (the only valid function call in expressions is inputi, not print!)
         elif node_type == 'fcall':
             function_name = node.get('name')
             if function_name == 'inputi':
@@ -164,9 +156,10 @@ class Interpreter (InterpreterBase):
         op2 = self.solve_expression(node.get('op2'))
 
 
-        #syntax for checking both operands are integers from chatgpt
+        # Citation: The following code was generated from ChatGPT
         if not isinstance(op1, int) or not isinstance(op2, int):
             super().error(ErrorType.TYPE_ERROR, "Incompatible types for arithmetic operation",)
+        # End of copied code
 
         if node.elem_type == '+':
             return op1 + op2
@@ -176,13 +169,13 @@ class Interpreter (InterpreterBase):
 
     
     def function_call(self, statement):
-        #get name of function: ex. 'inputi'
+        #get name of function: two functions in v1, inputi and print
         function_name = statement.get('name')
 
         if function_name == 'inputi':
             return self.do_inputi(statement)
         elif function_name == 'print':
-            return self.do_print(statement) #?
+            return self.do_print(statement) 
         else:
             #error p16 of spec
             super().error(ErrorType.NAME_ERROR, "Not one of the valid functions: print() or inputi()",) 
@@ -190,11 +183,9 @@ class Interpreter (InterpreterBase):
 
 
     def do_inputi(self, node):
-        #inputi
         arguments = node.get('args') #list containing 0+ expressoin, var, or value nodes that represent arguments
-
+        
         #either 0 or 1 parameter
-
         #if 1 parameter, it is of type string. need to output prompt
         if len(arguments) == 1:
             super().output(self.solve_expression(arguments[0])) #have to evaluate/solve prompt first
@@ -217,12 +208,31 @@ class Interpreter (InterpreterBase):
         arguments = node.get('args') #list of the arguments
         result = []
         for argument in arguments:
+            # Citation: the following code was generated from ChatGPT
             solved_result = self.solve_expression(argument)
             result.append(str(solved_result))
         
         result_string = ''.join(result)
+        # End of copied code
 
         super().output(result_string)
+
+
+
+def main():
+    program_source = """
+    func main() {
+        var x;
+        x = 5 + 6;
+        print("The sum is: ", x);
+    }
+    """
+    interpreter = Interpreter()
+    interpreter.run(program_source)
+
+if __name__ == "__main__":
+    main()
+
 
 
 
