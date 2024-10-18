@@ -97,6 +97,7 @@ class Interpreter (InterpreterBase):
                 self.function_call(statement)
             else:
                 #error??????
+                super().error(ErrorType.NAME_ERROR, "Not a valid statement",)
             
 
     
@@ -107,7 +108,7 @@ class Interpreter (InterpreterBase):
         var_name = statement.get('name')
         #error if variable being defined has already been defined
         if var_name in self.variables:
-            super().error(ErrorType.NAME_ERROR, "Variable already defined",)
+            super().error(ErrorType.NAME_ERROR, f"Variable {var_name} defined omre than once",)
 
         #add variable to main function's environment and give initial type/value
         self.variables[var_name] = None #initial type doesn't matter -- just assign None
@@ -122,7 +123,7 @@ class Interpreter (InterpreterBase):
         
         expression_node = statement.get('expression')
 
-        thing_to_be_assigned = solve_expression(expression_node)
+        thing_to_be_assigned = self.solve_expression(expression_node)
 
         self.variables[var_name] = thing_to_be_assigned
         
@@ -133,22 +134,14 @@ class Interpreter (InterpreterBase):
          
         #expression- binary operation
         if node_type == '+' or node_type == '-':
-            op1 = self.solve_expression(node.get('op1'))
-            op2 = self.solve_expression(node.get('op2'))
-
-
-            #syntax for checking both operands are integers from chatgpt
-            if not isinstance(op1, int) or not isinstance(op2, int):
-                super().error(ErrorType.TYPE_ERROR, "Operators must be integers")
-
-            if node_type == '+':
-                return op1 + op2
-            else:
-                return op1 - op2            
+            return self.solve_binary(node)
             
         #variable
         elif node_type == 'var':
-            return node.get('name')
+            var_name = node.get('name')
+            if var_name not in self.variables:
+                super().error(ErrorType.NAME_ERROR, f"Variable {var_name} has not not defined",)
+            return self.variables[var_name] #returns value of the variable
 
         #value
         elif node_type == 'int' or node_type == 'string':
@@ -163,8 +156,23 @@ class Interpreter (InterpreterBase):
                 super().error(ErrorType.NAME_ERROR, "only inputi is valid function call!")
         
         else:
-            super().error(ErrorType.TYPE_ERROR, "not one of the valid expressions")
+            super().error(ErrorType.TYPE_ERROR, "Not one of the valid expressions",)
         
+
+    def solve_binary(self, node):
+        op1 = self.solve_expression(node.get('op1'))
+        op2 = self.solve_expression(node.get('op2'))
+
+
+        #syntax for checking both operands are integers from chatgpt
+        if not isinstance(op1, int) or not isinstance(op2, int):
+            super().error(ErrorType.TYPE_ERROR, "Incompatible types for arithmetic operation",)
+
+        if node.elem_type == '+':
+            return op1 + op2
+        else:
+            return op1 - op2   
+
 
     
     def function_call(self, statement):
@@ -176,8 +184,8 @@ class Interpreter (InterpreterBase):
         elif function_name == 'print':
             return self.do_print(statement) #?
         else:
-            #error
-            super().error(ErrorType.NAME_ERROR) #check this????
+            #error p16 of spec
+            super().error(ErrorType.NAME_ERROR, "Not one of the valid functions: print() or inputi()",) 
 
 
 
@@ -199,6 +207,22 @@ class Interpreter (InterpreterBase):
         #to get user input:
         user_input = super().get_input() #any error handling here??
         return int(user_input)
+
+
+    #print function accepts 0+ arguments, which it will evaluate to get a resulting value, then concatenate without spaces into a string
+    # it will then output the string with the output() method in the InterpreterBase base class
+    def do_print(self, node):
+        #the node (statement node)
+        #there can be multiple arguments that you have to print
+        arguments = node.get('args') #list of the arguments
+        result = []
+        for argument in arguments:
+            solved_result = self.solve_expression(argument)
+            result.append(str(solved_result))
+        
+        result_string = ''.join(result)
+
+        super().output(result_string)
 
 
 
