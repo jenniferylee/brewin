@@ -1,43 +1,6 @@
 '''
-High level features:
-- One function: main
-*If not, ErrorType.NAME_ERROR
-
-- Statements
-    - New variable definition
-    *ErrorType.NAME_ERROR if variable being defined has already been defined
-        - give variable initial type/value when adding to main function's environment
-    - Assignment
-    *ErrorType.NAME_ERROR if variable being assigned has NOT been DEFINED in the "var" statement
-        - Use Python dict to evaluate righthand expression/value/variable and assoiate with the variable name on the left
-    - Function Calls
-        - print()
-            must accept 0+ arguments, then evaluate and concatenate to string, then output using super().output()
-            if program tries to print out a not yet initialized variable yet, just print any value of any type
-        - inputi()
-            it's valid to have inputi in print's args
-        - automatic call to main
-        *ErrorType.NAME_ERROR if calling any other function not above
-
-- Expressions
-    - Arithmetic 
-        Same as Python, C++
-        - only support addition and subtraction + and - 
-        - only operate on integers
-        *ErrorType.TYPE_ERROR if expression attempts to operate on a string
-    - Function call
-        Only valid function call is a call to the inputi() function
-        inputi() function may take one or no parameters (which is of type string)
-        *ErrorType.NAME_ERROR if inputi() has more than one parameter passed to it
-        - If there is a prompt parameter, must first output using super().output() before obtaining input
-        - To get input, call super().get_input()
-        *ErrorType.NAME_ERROR if expression refers to a variable that has not yet been defined
-    To evaluate expressions, use post-order tree traversal
-
-- Variables
-    - Must always be defined with a "var" statement before assignment/usage
-    *ErrorType.NAME_ERROR if not
-    - not of fixed type
+interpreteterv1 
+'brewin' on github
 
 '''
 
