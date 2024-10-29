@@ -22,7 +22,11 @@ from env_v2 import EnvironmentManager
 class Interpreter (InterpreterBase):
 
     #constants
-    BIN_OPS = {"+", "-", "*", "/", "&&", "||", "==", "!="}
+    BIN_OPS = {'+', '-', '*', '/', '&&', '||', '==', '!='}
+    #separate operators 
+    INT_ARITHMETIC_OPS = {'+', '-', '*', '/'}
+    BOOL_LOGICAL_OPS = {'&&', '||'}
+    COMP_OPS = {'==', '!='}
 
     def __init__ (self, console_output=True, inp=None, trace_output=False):
         super().__init__(console_output, inp)
@@ -78,9 +82,10 @@ class Interpreter (InterpreterBase):
     
     def variable_definition(self, statement):
         var_name = statement.get('name')
-        #error if variable being defined has already been defined *check by using EnvironmentManger initialized as env from Carey's solution*
         if not self.env.create(var_name, Value(Type.INT, 0)):
-            super().error(ErrorType.NAME_ERROR, f"Variable {var_name} defined more than once",)
+            super().error(
+                ErrorType.NAME_ERROR, f"Duplicate definition for variable {var_name}"
+            )
     
     
     def do_assignment(self, statement):
@@ -95,7 +100,7 @@ class Interpreter (InterpreterBase):
 
     def solve_expression(self, node):
         node_type = node.elem_type
-         
+        #print(f"Solving expression: {node}") 
         #expression- binary operation
         if node_type in Interpreter.BIN_OPS:
             return self.eval_operation(node)
@@ -109,8 +114,12 @@ class Interpreter (InterpreterBase):
             return val #returns Value object
 
         #value
-        elif node_type in {'int', 'string', 'bool'}:
-            return create_value(node.get('val'))
+        elif node.elem_type == InterpreterBase.INT_NODE:
+            return Value(Type.INT, node.get("val"))
+        elif node.elem_type == InterpreterBase.STRING_NODE:
+            return Value(Type.STRING, node.get("val"))
+        elif node.elem_type == InterpreterBase.BOOL_NODE:
+            return Value(Type.BOOL, node.get("val"))
         
         #expression - function call (the only valid function call in expressions is inputi, not print!)
         elif node_type == InterpreterBase.FCALL_NODE:
@@ -123,7 +132,7 @@ class Interpreter (InterpreterBase):
         else:
             super().error(ErrorType.TYPE_ERROR, "Not one of the valid expressions",)
         
-
+    
     def eval_operation(self, node):
         left_value_obj = self.solve_expression(node.get("op1")) #updated from Carey's solution
         right_value_obj = self.solve_expression(node.get("op2"))
@@ -131,13 +140,10 @@ class Interpreter (InterpreterBase):
         if left_value_obj.type() != right_value_obj.type():
             super().error(ErrorType.TYPE_ERROR, "Incompatible types for arithmetic operation",)
 
-
         #Arithmetic operations
         f = self.op_to_lambda[left_value_obj.type()][node.elem_type]
         return f(left_value_obj, right_value_obj)
-        
-
-   
+     
 
     
     def function_call(self, statement):
@@ -180,12 +186,18 @@ class Interpreter (InterpreterBase):
         arguments = node.get('args') #list of the arguments
         result = []
         for argument in arguments:
-            # Citation: the following code was generated from ChatGPT
             solved_result = self.solve_expression(argument)
-            result.append(str(solved_result))
-        
+             # Citation: the following code was generated from ChatGPT (converting Value objects to their underlying types: int, bool, string before printing)
+            if solved_result.type() == Type.INT:
+                result.append(str(solved_result.value()))  # Use value() to get the raw value
+            elif solved_result.type() == Type.BOOL:
+                result.append("true" if solved_result.value() else "false")  # Convert boolean
+            elif solved_result.type() == Type.STRING:
+                result.append(solved_result.value())  # Directly use the string value
+            else:
+                super().error(ErrorType.TYPE_ERROR, "Unsupported type for print")
+            # End of copied code
         result_string = ''.join(result)
-        # End of copied code
 
         super().output(result_string)
 
@@ -194,21 +206,22 @@ class Interpreter (InterpreterBase):
     def setup_ops(self):
         self.op_to_lambda = {}
         # set up operations on integers
-        self.op_to_lambda[Type.INT] = {}
+        self.op_to_lambda[Type.INT] = {} #key for int
+
         self.op_to_lambda[Type.INT]["+"] = lambda x, y: Value(
             x.type(), x.value() + y.value()
         )
         self.op_to_lambda[Type.INT]["-"] = lambda x, y: Value(
             x.type(), x.value() - y.value()
         )
-        # add other operators here later for int, string, bool, etc
         self.op_to_lambda[Type.INT]["*"] = lambda x, y: Value(
             x.type(), x.value() * y.value()
         )
         self.op_to_lambda[Type.INT]["/"] = lambda x, y: Value(
             x.type(), x.value() // y.value()
         )
-        #bool return types
+
+        #add integer comparsion operations
         self.op_to_lambda[Type.INT]["=="] = lambda x, y: Value(
             Type.BOOL, x.value() == y.value()
         )
@@ -230,16 +243,54 @@ class Interpreter (InterpreterBase):
 
 
         #boolean operations
+        self.op_to_lambda[Type.BOOL] = {} #key for bool
+
+        self.op_to_lambda[Type.BOOL]['&&'] = lambda x, y: Value(
+            Type.BOOL, x.value() and y.value()
+        )
+        self.op_to_lambda[Type.BOOL]["||"] = lambda x, y: Value(
+            Type.BOOL, x.value() or y.value()
+        )
+        self.op_to_lambda[Type.BOOL]["!"] = lambda x: Value(
+            Type.BOOL, not x.value() 
+        )
+
+        #add bool comparsion operations
+        self.op_to_lambda[Type.BOOL]["=="] = lambda x, y: Value(
+            Type.BOOL, x.value() == y.value()
+        )
+        self.op_to_lambda[Type.BOOL]["!="] = lambda x, y: Value(
+            Type.BOOL, x.value() != y.value()
+        )
         
 
 
+
         #string operations
+        self.op_to_lambda[Type.STRING] = {} #key for bool
         self.op_to_lambda[Type.STRING]["<"] = lambda x, y: Value(
             Type.BOOL, x.value() < y.value()
         )
 
 
 
+
+def main():
+    program_source = """
+    func main() {
+        var foobar; 
+        foobar = true;
+        var foofoo; 
+        foofoo = true;
+        print(foobar && foofoo);
+        
+    }
+    """
+    interpreter = Interpreter()
+    interpreter.run(program_source)
+
+if __name__ == "__main__":
+    main()
 
 
 
