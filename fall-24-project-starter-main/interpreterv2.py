@@ -145,20 +145,24 @@ class Interpreter (InterpreterBase):
         elif node.elem_type == InterpreterBase.BOOL_NODE:
             return Value(Type.BOOL, node.get("val"))
         
-        #expression - function call (the only valid function call in expressions is inputi, not print!)
+        #expression - function call (v2: no more restrictions on function calls from expression nodes)
         elif node_type == InterpreterBase.FCALL_NODE:
             function_name = node.get('name')
             if function_name == 'inputi':
                 return self.do_inputi(node)
+            elif function_name == 'print':
+                return self.do_print(node)
+            elif function_name == 'inputs':
+                return self.do_inputs(node)
             else:
-                super().error(ErrorType.NAME_ERROR, "only inputi is valid function call!")
+                super().error(ErrorType.NAME_ERROR, "Not a valid function call!")
         
         else:
             super().error(ErrorType.TYPE_ERROR, "Not one of the valid expressions",)
         
     
     def eval_operation(self, node):
-        left_value_obj = self.solve_expression(node.get("op1")) #updated from Carey's solution
+        left_value_obj = self.solve_expression(node.get("op1")) #updated from Carey's solution!! 
         right_value_obj = self.solve_expression(node.get("op2"))
 
         if left_value_obj.type() != right_value_obj.type():
@@ -253,14 +257,25 @@ class Interpreter (InterpreterBase):
         #check that the condition evaluates to bool, if not error
         if condition_result.type() != Type.BOOL:
             super().error(ErrorType.TYPE_ERROR, "Condition needs to evaluate to bool")
+
+        #incorporate scope for if statements (can have nested) --> new cope for each if block, else block
         
         #if condition true, run the statements
         if condition_result.value(): 
-            return self.run_statements(node.get('statements'))
+            newscope = EnvironmentManager(enclosing=self.env) #new scope when entering if block with current as enclosing scope
+            self.env = newscope #update the current environment to the innermost, newer scope
+            self.run_statements(node.get('statements')) #run the statements like usual
+            #exit inner block scope after running statements to restore scoep
+            self.env = self.env.enclosing
+
         #if false, run the else statements if available
+        #same incorporate scope for else block statements!
         else:
             if node.get('else_statements') is not None:
-                return self.run_statements(node.get('else_statements'))
+                newscope = EnvironmentManager(enclosing=self.env)
+                self.env = newscope
+                self.run_statements(node.get('else_statements'))
+                self.env = self.env.enclosing 
             
 
     def do_forloop(self, node):
