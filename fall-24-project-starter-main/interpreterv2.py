@@ -74,6 +74,15 @@ class Interpreter (InterpreterBase):
             #if function call
             elif statement.elem_type == InterpreterBase.FCALL_NODE:
                 self.function_call(statement)
+            #new for v2! if statement
+            elif statement.elem_type == 'if':
+                self.do_ifstatement(statement)
+            #new for v2! for loop
+            elif statement.elem_type == 'for':
+                self.do_forloop(statement)
+            #new for v2! return statement
+            elif statement.elem_type == 'return':
+                self.do_return(statement)
             else:
                 #not valid statement
                 super().error(ErrorType.NAME_ERROR, "Not a valid statement",)
@@ -119,8 +128,7 @@ class Interpreter (InterpreterBase):
                     super().error(ErrorType.TYPE_ERROR, "Bool negation requires bool")
                 else:
                     return Value(Type.BOOL, not op.value) #negate the op value for new value (not for bool)
-
-            
+    
         #variable
         elif node_type == 'var':
             var_name = node.get('name')
@@ -159,7 +167,6 @@ class Interpreter (InterpreterBase):
         f = self.op_to_lambda[left_value_obj.type()][node.elem_type]
         return f(left_value_obj, right_value_obj)
 
-     
 
     
     def function_call(self, statement):
@@ -238,42 +245,69 @@ class Interpreter (InterpreterBase):
         return str(user_input) #check if i can do this, or if i need to return a Value(Type.STRING or something?)
 
 
+    def do_ifstatement(self, node):
+        #dictionary has three keys: condition -> expr/val/var (eval to bool), statements -> list of statements, else_statements -> list of statements or None
+        condition = node.get('condition')
+        condition_result = self.solve_expression(condition)
+
+        #check that the condition evaluates to bool, if not error
+        if condition_result.type() != Type.BOOL:
+            super().error(ErrorType.TYPE_ERROR, "Condition needs to evaluate to bool")
+        
+        #if condition true, run the statements
+        if condition_result.value(): 
+            return self.run_statements(node.get('statements'))
+        #if false, run the else statements if available
+        else:
+            if node.get('else_statements') is not None:
+                return self.run_statements(node.get('else_statements'))
+            
+
+    def do_forloop(self, node):
+        #requirement: if the expr/val/var that is the condition of the statement does not evaluate to a boolean, you must generate an error
+
+        #first, do the assignment for the intialization
+        self.do_assignment(node.get('init'))
+        
+
+
+
     #carey's setup_ops function: each operation represented by a lambda function that returns new Value object 
     def setup_ops(self):
         self.op_to_lambda = {}
         # set up operations on integers
         self.op_to_lambda[Type.INT] = {} #key for int
 
-        self.op_to_lambda[Type.INT]["+"] = lambda x, y: Value(
+        self.op_to_lambda[Type.INT]['+'] = lambda x, y: Value(
             x.type(), x.value() + y.value()
         )
-        self.op_to_lambda[Type.INT]["-"] = lambda x, y: Value(
+        self.op_to_lambda[Type.INT]['='] = lambda x, y: Value(
             x.type(), x.value() - y.value()
         )
-        self.op_to_lambda[Type.INT]["*"] = lambda x, y: Value(
+        self.op_to_lambda[Type.INT]['*'] = lambda x, y: Value(
             x.type(), x.value() * y.value()
         )
-        self.op_to_lambda[Type.INT]["/"] = lambda x, y: Value(
+        self.op_to_lambda[Type.INT]['/'] = lambda x, y: Value(
             x.type(), x.value() // y.value()
         )
 
         #add integer comparsion operations
-        self.op_to_lambda[Type.INT]["=="] = lambda x, y: Value(
+        self.op_to_lambda[Type.INT]['=='] = lambda x, y: Value(
             Type.BOOL, x.value() == y.value()
         )
-        self.op_to_lambda[Type.INT][">"] = lambda x, y: Value(
+        self.op_to_lambda[Type.INT]['>'] = lambda x, y: Value(
             Type.BOOL, x.value() > y.value()
         )
-        self.op_to_lambda[Type.INT]["<"] = lambda x, y: Value(
+        self.op_to_lambda[Type.INT]['<'] = lambda x, y: Value(
             Type.BOOL, x.value() < y.value()
         )
-        self.op_to_lambda[Type.INT][">="] = lambda x, y: Value(
+        self.op_to_lambda[Type.INT]['>='] = lambda x, y: Value(
             Type.BOOL, x.value() >= y.value()
         )
-        self.op_to_lambda[Type.INT]["<="] = lambda x, y: Value(
+        self.op_to_lambda[Type.INT]['<='] = lambda x, y: Value(
             Type.BOOL, x.value() <= y.value()
         )
-        self.op_to_lambda[Type.INT]["!="] = lambda x, y: Value(
+        self.op_to_lambda[Type.INT]['!='] = lambda x, y: Value(
             Type.BOOL, x.value() != y.value()
         )
 
@@ -284,15 +318,15 @@ class Interpreter (InterpreterBase):
         self.op_to_lambda[Type.BOOL]['&&'] = lambda x, y: Value(
             Type.BOOL, x.value() and y.value()
         )
-        self.op_to_lambda[Type.BOOL]["||"] = lambda x, y: Value(
+        self.op_to_lambda[Type.BOOL]['||'] = lambda x, y: Value(
             Type.BOOL, x.value() or y.value()
         )
 
         #add bool comparsion operations
-        self.op_to_lambda[Type.BOOL]["=="] = lambda x, y: Value(
+        self.op_to_lambda[Type.BOOL]['=='] = lambda x, y: Value(
             Type.BOOL, x.value() == y.value()
         )
-        self.op_to_lambda[Type.BOOL]["!="] = lambda x, y: Value(
+        self.op_to_lambda[Type.BOOL]['!='] = lambda x, y: Value(
             Type.BOOL, x.value() != y.value()
         )
         
@@ -300,14 +334,14 @@ class Interpreter (InterpreterBase):
         #string operations
         self.op_to_lambda[Type.STRING] = {} #key for string
 
-        self.op_to_lambda[Type.STRING]["="] = lambda x, y: Value(
+        self.op_to_lambda[Type.STRING]['='] = lambda x, y: Value(
             Type.STRING, x.value() == y.value()
         )
-        self.op_to_lambda[Type.STRING]["!="] = lambda x, y: Value(
+        self.op_to_lambda[Type.STRING]['!='] = lambda x, y: Value(
             Type.STRING, x.value() != y.value()
         )
         #string concatenation
-        self.op_to_lambda[Type.STRING]["+"] = lambda x, y: Value(
+        self.op_to_lambda[Type.STRING]['+'] = lambda x, y: Value(
             Type.STRING, x.value() + y.value()
         )
 
