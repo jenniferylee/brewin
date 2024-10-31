@@ -139,11 +139,13 @@ class Interpreter (InterpreterBase):
 
         #value
         elif node.elem_type == InterpreterBase.INT_NODE:
-            return Value(Type.INT, node.get("val"))
+            return Value(Type.INT, node.get('val'))
         elif node.elem_type == InterpreterBase.STRING_NODE:
-            return Value(Type.STRING, node.get("val"))
+            return Value(Type.STRING, node.get('val'))
         elif node.elem_type == InterpreterBase.BOOL_NODE:
-            return Value(Type.BOOL, node.get("val"))
+            return Value(Type.BOOL, node.get('val'))
+        elif node.elem_type == InterpreterBase.NIL_NODE:
+            return Value(Type.NIL, node.get('val'))
         
         #expression - function call (v2: no more restrictions on function calls from expression nodes)
         elif node_type == InterpreterBase.FCALL_NODE:
@@ -265,7 +267,7 @@ class Interpreter (InterpreterBase):
             newscope = EnvironmentManager(enclosing=self.env) #new scope when entering if block with current as enclosing scope
             self.env = newscope #update the current environment to the innermost, newer scope
             self.run_statements(node.get('statements')) #run the statements like usual
-            #exit inner block scope after running statements to restore scoep
+            #exit inner block scope after running statements to restore scope
             self.env = self.env.enclosing
 
         #if false, run the else statements if available
@@ -279,11 +281,48 @@ class Interpreter (InterpreterBase):
             
 
     def do_forloop(self, node):
+        #four keys: init, condition, update, statements
         #requirement: if the expr/val/var that is the condition of the statement does not evaluate to a boolean, you must generate an error
 
         #first, do the assignment for the intialization
         self.do_assignment(node.get('init'))
+        '''  
+        #eval condition
+        condition = node.get('condition')
+        condition_result = self.solve_expression(condition)
         
+        #check that the condition evaluates to bool, if not error
+        if condition_result.type() != Type.BOOL:
+            super().error(ErrorType.TYPE_ERROR, "Condition needs to evaluate to bool")
+        '''
+        #while the condition is true, execute statements-- also update the looping variable that we initialized
+        while (True):
+
+            #make sure to re-evalualte hte ocndition each iteration to run the statements
+            condition = node.get('condition')
+            condition_result = self.solve_expression(condition)
+
+            #check that the condition evaluates to bool, if not error
+            if condition_result.type() != Type.BOOL:
+                super().error(ErrorType.TYPE_ERROR, "Condition needs to evaluate to bool")
+
+
+            if not condition_result.value():
+                break #break out of loop if condition evals to False
+
+
+            #setup new scope for inside for loop
+            newscope = EnvironmentManager(enclosing=self.env) #new scope when entering if block with current as enclosing scope
+            self.env = newscope #update the current environment to the innermost, newer scope
+            self.run_statements(node.get('statements')) #run the statements like usual
+
+            #do the update! after running statements
+            #update maps to an assignment statement
+            self.do_assignment(node.get('update'))
+
+            #exit inner block scope after running statements to restore scope
+            self.env = self.env.enclosing
+
 
 
 

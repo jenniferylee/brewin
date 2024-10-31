@@ -6,6 +6,7 @@ class Type:
     INT = "int"
     BOOL = "bool"
     STRING = "string"
+    NIL = "nil"
 
 # Represents a value, which has a type and its value
 class Value:
@@ -30,6 +31,8 @@ def create_value(val):
         return Value(Type.STRING, val)
     elif isinstance(val, int):
         return Value(Type.INT, val)
+    elif val == None:
+        return Value(Type.NIL)
     else:
         raise ValueError("Unknown value type")
 
@@ -43,4 +46,6 @@ def get_printable(val):
         if val.value() is True:
             return "true"
         return "false"
+    if val.type() == Type.NIL:
+        return "nil"
     return None
