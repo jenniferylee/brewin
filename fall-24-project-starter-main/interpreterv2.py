@@ -22,11 +22,11 @@ from env_v2 import EnvironmentManager
 class Interpreter (InterpreterBase):
 
     #constants
-    BIN_OPS = {'+', '-', '*', '/', '&&', '||', '==', '!='}
+    BIN_OPS = {'+', '-', '*', '/', '&&', '||', '==', '!=', '>', '>=', '<', '<='}
     #separate operators 
     INT_ARITHMETIC_OPS = {'+', '-', '*', '/'}
     BOOL_LOGICAL_OPS = {'&&', '||'}
-    COMP_OPS = {'==', '!='}
+    COMP_OPS = {'==', '!=', '>', '>=', '<', '<='}
 
     def __init__ (self, console_output=True, inp=None, trace_output=False):
         super().__init__(console_output, inp)
@@ -101,9 +101,25 @@ class Interpreter (InterpreterBase):
     def solve_expression(self, node):
         node_type = node.elem_type
         #print(f"Solving expression: {node}") 
+
         #expression- binary operation
         if node_type in Interpreter.BIN_OPS:
             return self.eval_operation(node)
+        
+        #expression- unary operation 
+        elif node_type == 'neg' or node_type == '!':
+            op = self.solve_expression(node.get('op1'))
+            if node_type == 'neg':
+                if op.type() != Type.INT:
+                    super().error(ErrorType.TYPE_ERROR, "Unary negation requires integer")
+                else:
+                    return Value(Type.INT, -op.value) #negate the op value for new value
+            else:
+                if op.type() != Type.BOOL:
+                    super().error(ErrorType.TYPE_ERROR, "Bool negation requires bool")
+                else:
+                    return Value(Type.BOOL, not op.value) #negate the op value for new value (not for bool)
+
             
         #variable
         elif node_type == 'var':
@@ -140,20 +156,22 @@ class Interpreter (InterpreterBase):
         if left_value_obj.type() != right_value_obj.type():
             super().error(ErrorType.TYPE_ERROR, "Incompatible types for arithmetic operation",)
 
-        #Arithmetic operations
         f = self.op_to_lambda[left_value_obj.type()][node.elem_type]
         return f(left_value_obj, right_value_obj)
+
      
 
     
     def function_call(self, statement):
-        #get name of function: two functions in v1, inputi and print
+        #get name of function: three functions in v2: inputi and print, inputs
         function_name = statement.get('name')
 
         if function_name == 'inputi':
             return self.do_inputi(statement)
         elif function_name == 'print':
             return self.do_print(statement) 
+        elif function_name == 'inputs':
+            return self.do_inputi(statement)
         else:
             #error p16 of spec
             super().error(ErrorType.NAME_ERROR, "Not one of the valid functions: print() or inputi()",) 
@@ -200,6 +218,24 @@ class Interpreter (InterpreterBase):
         result_string = ''.join(result)
 
         super().output(result_string)
+
+    
+    #inputs function- inputs and returns a string as its return value
+    def do_inputs(self, node):
+        arguments = node.get('args') #list containing 0+ expressoin, var, or value nodes that represent arguments
+        
+        #either 0 or 1 parameter
+        #if 1 parameter, it is of type string. need to output prompt
+        if len(arguments) == 1:
+            super().output(self.solve_expression(arguments[0])) #have to evaluate/solve prompt first
+
+        #if more than one parameter, must generate error name error??? (this is the case for inputi, check if it is for inputs)
+        elif len(arguments) > 1:
+            super().error(ErrorType.NAME_ERROR, f"No inputi() function found that takes >1 parameter",)
+
+        #to get user input:
+        user_input = super().get_input() #must use InterpreterBase.get_input() function (just like in inputi)
+        return str(user_input) #check if i can do this, or if i need to return a Value(Type.STRING or something?)
 
 
     #carey's setup_ops function: each operation represented by a lambda function that returns new Value object 
@@ -251,9 +287,6 @@ class Interpreter (InterpreterBase):
         self.op_to_lambda[Type.BOOL]["||"] = lambda x, y: Value(
             Type.BOOL, x.value() or y.value()
         )
-        self.op_to_lambda[Type.BOOL]["!"] = lambda x: Value(
-            Type.BOOL, not x.value() 
-        )
 
         #add bool comparsion operations
         self.op_to_lambda[Type.BOOL]["=="] = lambda x, y: Value(
@@ -264,13 +297,20 @@ class Interpreter (InterpreterBase):
         )
         
 
-
-
         #string operations
-        self.op_to_lambda[Type.STRING] = {} #key for bool
-        self.op_to_lambda[Type.STRING]["<"] = lambda x, y: Value(
-            Type.BOOL, x.value() < y.value()
+        self.op_to_lambda[Type.STRING] = {} #key for string
+
+        self.op_to_lambda[Type.STRING]["="] = lambda x, y: Value(
+            Type.STRING, x.value() == y.value()
         )
+        self.op_to_lambda[Type.STRING]["!="] = lambda x, y: Value(
+            Type.STRING, x.value() != y.value()
+        )
+        #string concatenation
+        self.op_to_lambda[Type.STRING]["+"] = lambda x, y: Value(
+            Type.STRING, x.value() + y.value()
+        )
+
 
 
 
