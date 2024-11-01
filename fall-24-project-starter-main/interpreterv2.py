@@ -43,7 +43,7 @@ class Interpreter (InterpreterBase):
 
         #process function nodes: since there's not just main() as the function, incorporate Carey's function table idea
         self.setup_function_table(ast)
-        main_function_node = self.get_function_by_name("main")
+        main_function_node = self.get_function_by_name("main", 0)
 
         #keep track of variables and their values --> incorporate EnvironmentManager class from Carey's solution
         self.env = EnvironmentManager() #initialization
@@ -149,12 +149,12 @@ class Interpreter (InterpreterBase):
                 if op.type() != Type.INT:
                     super().error(ErrorType.TYPE_ERROR, "Unary negation requires integer")
                 else:
-                    return Value(Type.INT, -op.value) #negate the op value for new value
+                    return Value(Type.INT, -op.value()) #negate the op value for new value
             else:
                 if op.type() != Type.BOOL:
                     super().error(ErrorType.TYPE_ERROR, "Bool negation requires bool")
                 else:
-                    return Value(Type.BOOL, not op.value) #negate the op value for new value (not for bool)
+                    return Value(Type.BOOL, not op.value()) #negate the op value for new value (not for bool)
     
         #variable
         elif node_type == 'var':
@@ -177,12 +177,18 @@ class Interpreter (InterpreterBase):
         #expression - function call (v2: no more restrictions on function calls from expression nodes)
         elif node_type == InterpreterBase.FCALL_NODE:
             function_name = node.get('name')
+            args = node.get('args') if 'args' in dir(node) else []
             if function_name == 'inputi':
                 return self.do_inputi(node)
             elif function_name == 'print':
                 return self.do_print(node)
             elif function_name == 'inputs':
                 return self.do_inputs(node)
+            #Citation: from ChatGPT
+            elif f"{function_name}_{len(args)}" in self.function_name_to_ast:
+                # Treat as a user-defined function call
+                return self.function_call(node)
+            #end of copied code
             else:
                 super().error(ErrorType.NAME_ERROR, "Not a valid function call!")
         
@@ -194,11 +200,26 @@ class Interpreter (InterpreterBase):
         left_value_obj = self.solve_expression(node.get("op1")) #updated from Carey's solution!! 
         right_value_obj = self.solve_expression(node.get("op2"))
 
+        #BUT can compare diff types for == and !=
+        if node.elem_type in {'==', '!='}:
+            if left_value_obj.type() == right_value_obj.type():
+                #perform operation bc types are compatible
+                f = self.op_to_lambda[left_value_obj.type()][node.elem_type]
+                return f(left_value_obj, right_value_obj)
+            else:
+                return Value(Type.BOOL, node.elem_type == '!=')
+
+
         if left_value_obj.type() != right_value_obj.type():
             super().error(ErrorType.TYPE_ERROR, "Incompatible types for arithmetic operation",)
 
-        f = self.op_to_lambda[left_value_obj.type()][node.elem_type]
-        return f(left_value_obj, right_value_obj)
+        #boolean operations && and || must use strict evaluation- both arguments must be evaluated in all cases
+        if node.elem_type in self.BOOL_LOGICAL_OPS:
+            f = self.op_to_lambda[Type.BOOL][node.elem_type]
+            return f(left_value_obj, right_value_obj)
+        else:
+            f = self.op_to_lambda[left_value_obj.type()][node.elem_type]
+            return f(left_value_obj, right_value_obj)
 
 
     
@@ -207,12 +228,19 @@ class Interpreter (InterpreterBase):
         function_name = statement.get('name')
         args = statement.get('args')
         param_count = len(args)
+        
+        # Check if it's a built-in function
+        if function_name in ['inputi', 'print', 'inputs']:
+            if function_name == 'inputi':
+                return self.do_inputi(statement)
+            elif function_name == 'print':
+                return self.do_print(statement)
+            elif function_name == 'inputs':
+                return self.do_inputs(statement)
 
-        #get function def
+        #check if a function exists and if the arugment count matches
         function_info = self.get_function_by_name(function_name, param_count)
         params = function_info['args']
-
-        #setup new scope/environment for each func call
         new_env = EnvironmentManager(enclosing=self.env)
         self.env = new_env
 
@@ -220,7 +248,7 @@ class Interpreter (InterpreterBase):
         #passing by value: bind each param to the evaluated argument value
         for param, arg in zip(params,args):
             value = self.solve_expression(arg) #eval the argument
-            self.env.create(param,value) #store param in the function's environment
+            self.env.create(param.get('name'),value) #store param in the function's environment
          
         try:
             self.run_statements(function_info["statements"])
@@ -251,8 +279,8 @@ class Interpreter (InterpreterBase):
         #either 0 or 1 parameter
         #if 1 parameter, it is of type string. need to output prompt
         if len(arguments) == 1:
-            super().output(self.solve_expression(arguments[0])) #have to evaluate/solve prompt first
-            #maybe have to edit to do error checking that the prompt is a string (not relevant for v1??)
+            prompt_value = self.solve_expression(arguments[0])
+            super().output(get_printable(prompt_value))  #ensures we print the actual string content --> have to call get_printable because we need to convert to printable string from value object 
 
         #if more than one parameter, must generate error name error
         elif len(arguments) > 1:
@@ -260,7 +288,7 @@ class Interpreter (InterpreterBase):
 
         #to get user input:
         user_input = super().get_input() #any error handling here??
-        return int(user_input)
+        return Value(Type.INT, int(user_input))
 
 
     #print function accepts 0+ arguments, which it will evaluate to get a resulting value, then concatenate without spaces into a string
@@ -276,15 +304,19 @@ class Interpreter (InterpreterBase):
             if solved_result.type() == Type.INT:
                 result.append(str(solved_result.value()))  # Use value() to get the raw value
             elif solved_result.type() == Type.BOOL:
-                result.append("true" if solved_result.value() else "false")  # Convert boolean
+                result.append(str(solved_result.value()).lower())  # Force lowercase for boolean
             elif solved_result.type() == Type.STRING:
                 result.append(solved_result.value())  # Directly use the string value
+            elif solved_result.type() == Type.NIL:
+                result.append("nil")
             else:
                 super().error(ErrorType.TYPE_ERROR, "Unsupported type for print")
             # End of copied code
         result_string = ''.join(result)
 
         super().output(result_string)
+
+        return Value(Type.NIL) #test case where do_print needs to return a Value object of Type.NIL instead of Python None
 
     
     #inputs function- inputs and returns a string as its return value
@@ -339,7 +371,11 @@ class Interpreter (InterpreterBase):
         #requirement: if the expr/val/var that is the condition of the statement does not evaluate to a boolean, you must generate an error
 
         #first, do the assignment for the intialization
-        self.do_assignment(node.get('init'))
+        init = node.get('init')
+        if init.elem_type == InterpreterBase.VAR_DEF_NODE:
+            self.variable_definition(init)
+        else:
+            self.do_assignment(init)
         '''  
         #eval condition
         condition = node.get('condition')
@@ -350,7 +386,7 @@ class Interpreter (InterpreterBase):
             super().error(ErrorType.TYPE_ERROR, "Condition needs to evaluate to bool")
         '''
         #while the condition is true, execute statements-- also update the looping variable that we initialized
-        while (True):
+        while True:
 
             #make sure to re-evalualte hte ocndition each iteration to run the statements
             condition = node.get('condition')
@@ -370,12 +406,14 @@ class Interpreter (InterpreterBase):
             self.env = newscope #update the current environment to the innermost, newer scope
             self.run_statements(node.get('statements')) #run the statements like usual
 
+
+            #exit inner block scope after running statements to restore scope
+            self.env = self.env.enclosing
+
             #do the update! after running statements
             #update maps to an assignment statement
             self.do_assignment(node.get('update'))
 
-            #exit inner block scope after running statements to restore scope
-            self.env = self.env.enclosing
 
 
     def do_return(self, node):
@@ -397,7 +435,7 @@ class Interpreter (InterpreterBase):
         self.op_to_lambda[Type.INT]['+'] = lambda x, y: Value(
             x.type(), x.value() + y.value()
         )
-        self.op_to_lambda[Type.INT]['='] = lambda x, y: Value(
+        self.op_to_lambda[Type.INT]['-'] = lambda x, y: Value(
             x.type(), x.value() - y.value()
         )
         self.op_to_lambda[Type.INT]['*'] = lambda x, y: Value(
@@ -450,16 +488,27 @@ class Interpreter (InterpreterBase):
         #string operations
         self.op_to_lambda[Type.STRING] = {} #key for string
 
-        self.op_to_lambda[Type.STRING]['='] = lambda x, y: Value(
-            Type.STRING, x.value() == y.value()
+        self.op_to_lambda[Type.STRING]['=='] = lambda x, y: Value(
+            Type.BOOL, x.value() == y.value()
         )
         self.op_to_lambda[Type.STRING]['!='] = lambda x, y: Value(
-            Type.STRING, x.value() != y.value()
+            Type.BOOL, x.value() != y.value()
         )
         #string concatenation
         self.op_to_lambda[Type.STRING]['+'] = lambda x, y: Value(
             Type.STRING, x.value() + y.value()
         )
+
+        #nil perations
+        self.op_to_lambda[Type.NIL] = {} #key for nil
+        self.op_to_lambda[Type.NIL]['=='] = lambda x, y: Value(
+            Type.BOOL, x.type() == Type.NIL and y.type() == Type.NIL
+        )
+        self.op_to_lambda[Type.NIL]['!='] = lambda x, y: Value(
+            Type.BOOL, not (x.type() == Type.NIL and y.type() == Type.NIL)
+        )
+
+
 
 
 
@@ -476,8 +525,17 @@ def main():
         
     }
     """
+    program_source1 = """
+    func main() {
+    var b; 
+    b = inputi("Hello");
+    print(b);
+    }
+
+
+    """
     interpreter = Interpreter()
-    interpreter.run(program_source)
+    interpreter.run(program_source1)
 
 if __name__ == "__main__":
     main()

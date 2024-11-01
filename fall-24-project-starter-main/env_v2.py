@@ -28,10 +28,11 @@ class EnvironmentManager:
     def set(self, symbol, value):
         if symbol in self.environment:
             self.environment[symbol] = value
+            return True
         elif self.enclosing:
             return self.enclosing.set(symbol, value) #recursively call set method until var found in enclosing
         else:
-            return True
+            return False
 
     #not changed-- new var is always declared in the current innermost scope
     def create(self, symbol, start_val):
