@@ -47,12 +47,16 @@ class Interpreter (InterpreterBase):
 
         #keep track of variables and their values --> incorporate EnvironmentManager class from Carey's solution
         self.env = EnvironmentManager() #initialization
+        #implement a flag to indicate if in the top level scope for main function
+        self.in_main_scope = True 
 
         #run main function statements and handle early termination
         try:
             self.run_statements(main_function_node.get("statements")) #need to update to handle multifunction
         except ReturnException:
             pass #terminate program immediately when return in main
+        finally:
+            self.in_main_scope = False #exit main function, so exit the outermost/top scope then
 
 
     #Carey's function table function
@@ -118,10 +122,18 @@ class Interpreter (InterpreterBase):
     
     def variable_definition(self, statement):
         var_name = statement.get('name')
-        if not self.env.create(var_name, Value(Type.INT, 0)):
-            super().error(
-                ErrorType.NAME_ERROR, f"Duplicate definition for variable {var_name}"
-            )
+        if self.in_main_scope:
+        #check if variable already exists"globally"
+            if self.in_main_scope and len(self.env.block_stack) == 1:  #indicates that this is in the outer/global/main scope
+                if var_name not in self.env.top_scope:
+                    self.env.create_top(var_name, Value(Type.INT, 0))
+                else:
+                    super().error(ErrorType.NAME_ERROR, f"Duplicate global definition for variable {var_name}")
+            else:
+                if not self.env.create(var_name, Value(Type.INT, 0)):
+                    super().error(
+                        ErrorType.NAME_ERROR, f"Duplicate definition for variable {var_name}"
+                    )
     
     
     def do_assignment(self, statement):

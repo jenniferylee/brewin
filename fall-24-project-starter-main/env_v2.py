@@ -20,12 +20,14 @@ Updated way:
     function_stack: isolates scope of a function by saving the current block_stack before each new function call --> allows recursion to work
     block_stack: tracking inner scopes within a function (tackles if/for scope blocks) --> do so by popping/appending dictionaries to the stack
 - Basically adding a new scope (dictionary) for new function calls
+- main() is the outermost/top level/"global" scope 
 '''
 
 class EnvironmentManager:
     def __init__(self, enclosing=None):
         self.function_stack = [] #tracking isolated function call scopes
         self.block_stack = [{}] #tracking nested block scopes (like if/for statements) within function
+        self.top_scope = {} #for main function
 
     
     def push_function_scope(self):
@@ -44,7 +46,8 @@ class EnvironmentManager:
     
     def pop_block_scope(self):
         #remove most recent block dict from stack
-        self.block_stack.pop()
+        if len(self.block_stack) > 1: #add this to pass test case where u ensure top level scope
+            self.block_stack.pop()
 
 
     def get(self, symbol):
@@ -52,6 +55,9 @@ class EnvironmentManager:
         for scope in reversed(self.block_stack):
             if symbol in scope:
                 return scope[symbol]
+        #if not found, check the top level scope "global"
+        if symbol in self.top_scope:
+            return self.top_scope[symbol]
         return None
 
 
@@ -61,6 +67,10 @@ class EnvironmentManager:
             if symbol in scope:
                 scope[symbol] = value
                 return True
+        #also in set: if not found in local scope, check top level, outermost scope
+        if symbol in self.top_scope:
+            self.top_scope[symbol] = value
+            return True
         return False
 
 
@@ -71,5 +81,10 @@ class EnvironmentManager:
         #then you can add it to scope
         self.block_stack[-1][symbol] = value
         return True
+
+
+    def create_top(self, symbol, value):
+        #creating variable in the otuermost scope
+        self.top_scope[symbol] = value
     
         
