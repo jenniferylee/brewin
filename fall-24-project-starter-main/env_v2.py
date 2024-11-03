@@ -5,12 +5,39 @@
 
 
 #update EnvironmentManager to work with scoping:
+'''
+new update: changing how to manage scope
+Old way:
+- Used a recursive structure where each function call created a new instance of EnvironmentManager class and used an 'enclosing' attribute to keep track/point to previous instance
+- Therefore, new instances would be able to walk up the enclosing chain to refer to previously/outer defined variables (inner->outer)
+- Problems: not distinguishing/hard to distinguish between function call blocks versus if/for blocks (if and for you can traverse to outer scopes but not for function calls)
+            Also did not make sure that main is the outermost/top-level scope!
+
+Learned in discussion that it would be better to implement scope with a stack of dictionaries and make sure to distinguish scoping between function call blocks and if/for blocks
+
+Updated way:
+- Use stack
+    function_stack: isolates scope of a function by saving the current block_stack before each new function call --> allows recursion to work
+    block_stack: tracking inner scopes within a function (tackles if/for scope blocks) --> do so by popping/appending dictionaries to the stack
+- Basically adding a new scope (dictionary) for new function calls
+'''
 
 class EnvironmentManager:
     def __init__(self, enclosing=None):
-        self.environment = {}
-        #give each environment reference to its enclosing one --> if no enclosing environment, it is None aka global scope
-        self.enclosing = enclosing
+        self.function_stack = [] #tracking isolated function call scopes
+        self.block_stack = [{}] #tracking nested block scopes (like if/for statements) within function
+
+    
+    def push_function_scope(self):
+        self.function_stack.append(list(self.block_stack)) #save copy of block stack for isolation
+        self.block_stack.append({}) #add new scope for  a new function call! 
+
+    def pop_function_scope(self):
+        #restore preivious function's block stack --> from the function stack
+        if self.function_stack:
+            self.block_stack = self.function_stack.pop()
+        else:
+            self.block_stack = [{}] #or if the function stack is empty, reset to single global scope 
 
 
     # Gets the data associated a variable name
