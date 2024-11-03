@@ -346,8 +346,8 @@ class Interpreter (InterpreterBase):
         #either 0 or 1 parameter
         #if 1 parameter, it is of type string. need to output prompt
         if len(arguments) == 1:
-            super().output(self.solve_expression(arguments[0])) #have to evaluate/solve prompt first
-
+            prompt_value = self.solve_expression(arguments[0])
+            super().output(get_printable(prompt_value))  #ensures we print the actual string content --> have to call get_printable because we need to convert to printable string from value object 
         #if more than one parameter, must generate error name error??? (this is the case for inputi, check if it is for inputs)
         elif len(arguments) > 1:
             super().error(ErrorType.NAME_ERROR, f"No inputi() function found that takes >1 parameter",)
@@ -539,10 +539,17 @@ def main():
     }
     """
     program_source1 = """
+    func g(){
+        print(x);
+    }
+
+    func f(){
+        var x;
+        x = 4;
+        g();
+    }
     func main() {
-    var b; 
-    b = inputi("Hello");
-    print(b);
+        f();
     }
 
 
