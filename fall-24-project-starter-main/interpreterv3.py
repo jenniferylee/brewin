@@ -6,9 +6,9 @@ import copy
 from enum import Enum
 
 from brewparse import parse_program
-from env_v2 import EnvironmentManager
+from env_v3 import EnvironmentManager
 from intbase import InterpreterBase, ErrorType
-from type_valuev2 import Type, Value, create_value, get_printable
+from type_valuev3 import Type, Value, create_value, get_printable
 
 
 class ExecStatus(Enum):
@@ -115,9 +115,15 @@ class Interpreter(InterpreterBase):
         args = {}
         for formal_ast, actual_ast in zip(formal_args, actual_args):
             result = copy.copy(self.__eval_expr(actual_ast))
-            expected_return_type = func_ast.get("return_type")
-            if return_val.type() != expected_return_type:
-                super().error(ErrorType.TYPE_ERROR,f"Function {func_name} has an expected return type of {expected_return_type} but seems to be actually {return_val.type()}")
+            expected_type = formal_ast.get("var_type") #wait check this var_type or return_type
+
+            # if expected type is bool, call coercion function to coerce int --> bool
+            if expected_type == Type.BOOL and result.type() == Type.INT:
+                result = self.__do_int_to_bool_coercion(result)
+            
+            #also have to check for type compatilbity after coercin
+            if result.type() != expected_type:
+                super().error(ErrorType.TYPE_ERROR,f"Function {func_name} has an expected return type of {expected_type} but seems to be actually {result.type()}")
             arg_name = formal_ast.get("name")
             args[arg_name] = result
 
@@ -155,16 +161,23 @@ class Interpreter(InterpreterBase):
     def __assign(self, assign_ast):
         var_name = assign_ast.get("name")
         value_obj = self.__eval_expr(assign_ast.get("expression"))
+
+        curr_val = self.env.get(var_name)
+
+        #check for type coercion for when assigning bool (because can assign int to a boolean variable now)
+        if curr_val.type() == Type.BOOL and value_obj.type() == Type.INT:
+            value_obj = self.__do_int_to_bool_coercion(value_obj)
+
+        # doing static type checking:
+        if curr_val.type() != value_obj.type():
+            super().error(ErrorType.TYPE_ERROR, f"Types are not the same! {var_name} is {curr_val.type()} but got {value_obj.type()}")
+
         if not self.env.set(var_name, value_obj):
             super().error(
                 ErrorType.NAME_ERROR, f"Undefined variable {var_name} in assignment"
             )
 
-        curr_val = self.env.get(var_name)
-        # doing type checking:
-        if curr_val.type() != value_obj.type():
-            super().error(ErrorType.TYPE_ERROR, f"Types are not the same! {var_name} is {curr_val.type()} but got {value_obj.type()}")
-    
+
     def __var_def(self, var_ast):
         var_name = var_ast.get("name")
         #add variable type!
@@ -201,6 +214,27 @@ class Interpreter(InterpreterBase):
     def __eval_op(self, arith_ast):
         left_value_obj = self.__eval_expr(arith_ast.get("op1"))
         right_value_obj = self.__eval_expr(arith_ast.get("op2"))
+
+        #first, coerce int to bool for the logical operations of && and || 
+        if arith_ast.elem_type in {"&&", "||"}:
+            left_value_obj = self.__do_int_to_bool_coercion(left_value_obj)
+            right_value_obj = self.__do_int_to_bool_coercion(right_value_obj)
+
+        # also do coercion for the comparison operations == and !=
+        if arith_ast.elem_type in {"==", "!="}:
+            #you can only do coercion of one of them is int and the other is bool
+            if left_value_obj.type() == Type.INT and right_value_obj.type() == Type.BOOL:
+                left_value_obj = self.__do_int_to_bool_coercion(left_value_obj)
+            elif left_value_obj.type() == Type.BOOL and right_value_obj.type() == Type.INT:
+                right_value_obj = self.__do_int_to_bool_coercion(right_value_obj)
+
+            #now compare once coerced
+            if arith_ast.elem_type == "==":
+                return Value(Type.BOOL, left_value_obj.value() == right_value_obj.value())
+            elif arith_ast.elem_type == "!=":
+                return Value(Type.BOOL, left_value_obj.value() != right_value_obj.value())
+
+        #now back to regular compability no coercions for different types:
         if not self.__compatible_types(
             arith_ast.elem_type, left_value_obj, right_value_obj
         ):
@@ -303,6 +337,10 @@ class Interpreter(InterpreterBase):
     def __do_if(self, if_ast):
         cond_ast = if_ast.get("condition")
         result = self.__eval_expr(cond_ast)
+
+        # coerce from int to bool if applicable
+        result = self.__do_int_to_bool_coercion(result) #no additional check needed first because coercion function will just return value if not int
+
         if result.type() != Type.BOOL:
             super().error(
                 ErrorType.TYPE_ERROR,
@@ -329,6 +367,11 @@ class Interpreter(InterpreterBase):
         run_for = Interpreter.TRUE_VALUE
         while run_for.value():
             run_for = self.__eval_expr(cond_ast)  # check for-loop condition
+
+            # first apply coercion if int
+            if run_for.type() == Type.INT:
+                run_for = self.__do_int_to_bool_coercion(run_for)
+
             if run_for.type() != Type.BOOL:
                 super().error(
                     ErrorType.TYPE_ERROR,
@@ -348,4 +391,38 @@ class Interpreter(InterpreterBase):
         if expr_ast is None:
             return (ExecStatus.RETURN, Interpreter.NIL_VALUE)
         value_obj = copy.copy(self.__eval_expr(expr_ast))
+
+        # do coercion from int to bool if the function's return type is bool
+        func_return_type = self.current_function_return_type 
+        if func_return_type == Type.BOOL and value_obj.type() == Type.INT:
+            value_obj = self.__do_int_to_bool_coercion(value_obj)
+
         return (ExecStatus.RETURN, value_obj)
+    
+    def __do_int_to_bool_coercion(self, value_obj):
+        if value_obj.type() == Type.INT:
+            return Value(Type.BOOL, value_obj.value() != 0) #this is the coercion-- 0 goes to False and non-zero coerced to True
+        return value_obj # if the type is not int, just return the origional value
+    
+
+def main():
+
+    program_source1 = """
+    func main() {
+
+        var result : bool;
+        result = 5 == true; 
+        print(result);
+
+        result = 0 == false;
+        print(result);
+
+        result = 5 != true; 
+        print(result); 
+    }
+    """
+    interpreter = Interpreter()
+    interpreter.run(program_source1)
+
+if __name__ == "__main__":
+    main()
