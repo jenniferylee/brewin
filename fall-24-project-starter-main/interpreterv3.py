@@ -136,9 +136,26 @@ class Interpreter(InterpreterBase):
         # and add the formal arguments to the activation record
         for arg_name, value in args.items():
           self.env.create(arg_name, value)
-        _, return_val = self.__run_statements(func_ast.get("statements"))
+        status, return_val = self.__run_statements(func_ast.get("statements")) #instead of _ add variable status bc we need it for checking default return 
         self.env.pop_func()
+
+        # pop the function return type as well
+        self.return_type_stack.pop()
+
+        #now, have to check for if we need to return default return value!
+        if status != ExecStatus.RETURN:
+            func_return_type = func_ast.get("return_type")
+            if func_return_type == Type.INT:
+                return Value(Type.INT, 0) #int default value is 0
+            elif func_return_type == Type.STRING:
+                return Value(Type.STRING, "") #string default value is ""
+            elif func_return_type == Type.BOOL:
+                return Value(Type.BOOL, False) #bool default value is False
+            elif func_return_type == Type.NIL:
+                return Interpreter.NIL_VALUE #we refer to nil value with NIL_VALUE instead of None? check this
+
         return return_val
+    
 
     def __call_print(self, args):
         output = ""
@@ -393,7 +410,20 @@ class Interpreter(InterpreterBase):
     def __do_return(self, return_ast):
         expr_ast = return_ast.get("expression")
         if expr_ast is None:
+            # got to check when no return type is specified --> then return default
+            if self.return_type_stack:
+                func_return_type = self.return_type_stack[-1] #the current function return type is the latest one, at top of stack
+                if func_return_type == Type.INT:
+                    return (ExecStatus.RETURN, Value(Type.INT, 0)) #int default value is 0
+                elif func_return_type == Type.STRING:
+                    return (ExecStatus.RETURN, Value(Type.STRING, "")) #string default value is ""
+                elif func_return_type == Type.BOOL:
+                    return (ExecStatus.RETURN, Value(Type.BOOL, False)) #bool default value is False
+                elif func_return_type == Type.NIL:
+                    return (ExecStatus.RETURN, Interpreter.NIL_VALUE) #we refer to nil value with NIL_VALUE instead of None? check this
+ 
             return (ExecStatus.RETURN, Interpreter.NIL_VALUE)
+
         value_obj = copy.copy(self.__eval_expr(expr_ast))
 
         if self.return_type_stack:
@@ -417,9 +447,17 @@ class Interpreter(InterpreterBase):
 def main():
 
     program_source1 = """
-    func main() {
-        var flag : bool;
-        flag = 42; 
+    func main() : void {
+        print(foo()); 
+        print(bar());
+    }
+
+    func foo() : int {
+        return; 
+    }
+
+    func bar() : bool {
+        print("bar");
     }
     """
     interpreter = Interpreter()
