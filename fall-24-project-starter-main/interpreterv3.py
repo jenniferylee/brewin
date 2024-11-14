@@ -115,6 +115,9 @@ class Interpreter(InterpreterBase):
         args = {}
         for formal_ast, actual_ast in zip(formal_args, actual_args):
             result = copy.copy(self.__eval_expr(actual_ast))
+            expected_return_type = func_ast.get("return_type")
+            if return_val.type() != expected_return_type:
+                super().error(ErrorType.TYPE_ERROR,f"Function {func_name} has an expected return type of {expected_return_type} but seems to be actually {return_val.type()}")
             arg_name = formal_ast.get("name")
             args[arg_name] = result
 
@@ -156,10 +159,17 @@ class Interpreter(InterpreterBase):
             super().error(
                 ErrorType.NAME_ERROR, f"Undefined variable {var_name} in assignment"
             )
+
+        curr_val = self.env.get(var_name)
+        # doing type checking:
+        if curr_val.type() != value_obj.type():
+            super().error(ErrorType.TYPE_ERROR, f"Types are not the same! {var_name} is {curr_val.type()} but got {value_obj.type()}")
     
     def __var_def(self, var_ast):
         var_name = var_ast.get("name")
-        if not self.env.create(var_name, Interpreter.NIL_VALUE):
+        #add variable type!
+        var_type = var_ast.get("var_type") # var_type is the second key in vardef statement node's dictionary
+        if not self.env.create(var_name, Value(var_type, None)):
             super().error(
                 ErrorType.NAME_ERROR, f"Duplicate definition for variable {var_name}"
             )
