@@ -33,6 +33,11 @@ class EnvironmentManager:
     def push_function_scope(self):
         self.function_stack.append(list(self.block_stack)) #save copy of block stack for isolation
         self.block_stack.append({}) #add new scope for  a new function call! 
+        #save the current block stack as a separate, isolated scope
+        #self.function_stack.append(self.block_stack.copy())  # Ensures isolation
+        #initialize a new isolated block stack for the new function call
+        #self.block_stack = [{}]
+
 
     def pop_function_scope(self):
         #restore preivious function's block stack --> from the function stack

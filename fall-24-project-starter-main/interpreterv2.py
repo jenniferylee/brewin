@@ -280,17 +280,7 @@ class Interpreter (InterpreterBase):
             return Value(Type.NIL) #if no return statement, return nil value by default #if no return statement, return nil value by default
         #end of copied code
 
-        '''
-        if function_name == 'inputi':
-            return self.do_inputi(statement)
-        elif function_name == 'print':
-            return self.do_print(statement) 
-        elif function_name == 'inputs':
-            return self.do_inputi(statement)
-        else:
-            #error p16 of spec
-            super().error(ErrorType.NAME_ERROR, "Not one of the valid functions: print() or inputi()",) 
-        '''
+
 
 
     def do_inputi(self, node):
@@ -539,18 +529,20 @@ def main():
     }
     """
     program_source1 = """
-    func g(){
-        print(x);
+    func main() {
+        f(10);
+    }
+    func f(x){
+        var y;
+        y = x + 15;
+        g(x);
+    }
+    func g(x){
+        var z;
+        z = x + y;
     }
 
-    func f(){
-        var x;
-        x = 4;
-        g();
-    }
-    func main() {
-        f();
-    }
+
 
 
     """
