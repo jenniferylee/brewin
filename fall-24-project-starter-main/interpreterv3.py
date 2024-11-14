@@ -28,6 +28,7 @@ class Interpreter(InterpreterBase):
         super().__init__(console_output, inp)
         self.trace_output = trace_output
         self.__setup_ops()
+        self.return_type_stack = [] #stack to keep track of function return types
 
     # run a program that's provided in a string
     # usese the provided Parser found in brewparse.py to parse the program
@@ -110,6 +111,9 @@ class Interpreter(InterpreterBase):
                 ErrorType.NAME_ERROR,
                 f"Function {func_ast.get('name')} with {len(actual_args)} args not found",
             )
+
+        # push function's return type onto the stack
+        self.return_type_stack.append(func_ast.get("return_type"))
 
         # first evaluate all of the actual parameters and associate them with the formal parameter names
         args = {}
@@ -392,10 +396,15 @@ class Interpreter(InterpreterBase):
             return (ExecStatus.RETURN, Interpreter.NIL_VALUE)
         value_obj = copy.copy(self.__eval_expr(expr_ast))
 
-        # do coercion from int to bool if the function's return type is bool
-        func_return_type = self.current_function_return_type 
-        if func_return_type == Type.BOOL and value_obj.type() == Type.INT:
-            value_obj = self.__do_int_to_bool_coercion(value_obj)
+        if self.return_type_stack:
+            func_return_type = self.return_type_stack[-1]
+            # do coercion from int to bool if the function's return type is bool
+            if func_return_type == Type.BOOL and value_obj.type() == Type.INT:
+                value_obj = self.__do_int_to_bool_coercion(value_obj)
+
+            #type check the return value
+            if func_return_type != value_obj.type():
+                super().error(ErrorType.TYPE_ERROR, f"Return type mismatches! We expect {func_return_type} but we got {value_obj.type()}")
 
         return (ExecStatus.RETURN, value_obj)
     
@@ -409,16 +418,8 @@ def main():
 
     program_source1 = """
     func main() {
-
-        var result : bool;
-        result = 5 == true; 
-        print(result);
-
-        result = 0 == false;
-        print(result);
-
-        result = 5 != true; 
-        print(result); 
+        var flag : bool;
+        flag = 42; 
     }
     """
     interpreter = Interpreter()
