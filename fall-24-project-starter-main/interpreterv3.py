@@ -181,7 +181,20 @@ class Interpreter(InterpreterBase):
         output = ""
         for arg in args:
             result = self.__eval_expr(arg)  # result is a Value object
-            output = output + get_printable(result)
+
+            if not isinstance(result, Value):
+                print(f"DEBUG: Expected Value object but got {type(result)}")
+                super().error(ErrorType.TYPE_ERROR, "Expectd a Value object in the print funciotn")
+            # for brewin++ have to check if the value is None or nil type
+            if result.type() == Type.NIL or result.value() is None:
+                output += "nil"
+                # Properly handle known types
+            elif result.type() in [Type.INT, Type.BOOL, Type.STRING]:
+                output += get_printable(result)
+            else:
+                output += f"<unknown type>"
+            #else:
+                #output = output + get_printable(result)
         super().output(output)
         return Interpreter.NIL_VALUE
 
@@ -218,32 +231,46 @@ class Interpreter(InterpreterBase):
             if base_var.value() is None:
                 super().error(ErrorType.FAULT_ERROR, f"Variable {base_var_name} is nil")
 
-            #traverse to eht correct field
+            #traverse through the fields to find the correct field
+            # Citation: The following code was from ChatGPT
             struct_value = base_var.value()
             for field_name in field_names[:-1]:
-                if field_name not in struct_value():
+                if field_name not in struct_value:
                     super().error(ErrorType.NAME_ERROR, f"Field{field_name} not found in struct {base_var.type()}")
                 struct_value = struct_value[field_name]
                 if struct_value.type() not in self.struct_name_to_def:
                     super().error(ErrorType.TYPE_ERROR, f"{field_name} not a struct")
                 if struct_value.value() is None:
                     super().error(ErrorType.FAULT_ERROR, f"Field {field_name} is nil")
+                struct_value = struct_value.value()
+           # End of copied code
             
             #now you can handle the final field to be assigned
             final_field_name = field_names[-1]
             if final_field_name not in struct_value:
                 super().error(ErrorType.NAME_ERROR, f"Field {final_field_name} not found in struct {base_var.type()}")
             field_value = struct_value[final_field_name]
+            '''struct_value_dict = struct_value # Access the dictionary of fields
+            if final_field_name not in struct_value_dict:
+                super().error(ErrorType.NAME_ERROR, f"Field {final_field_name} not found in struct {base_var.type()}")
+            field_value = struct_value[final_field_name]'''
 
-            #also add the type checking before you do the assignment here
-            if field_value.type() != value_obj.type():
-                super().error(ErrorType.TYPE_ERROR, f"The types do not match-- can't assign {value_obj.type()} to {final_field_name} of type {field_value.type()}")
+            # Handle case where the field is nil (uninitialized struct field)
+            if field_value.type() == Type.NIL:
+                # Check if the value being assigned matches the intended struct type
+                if value_obj.type() in self.struct_name_to_def:
+                    struct_value[final_field_name] = value_obj  # Perform the assignment
+                else:
+                    super().error(ErrorType.TYPE_ERROR, f"Cannot assign value of type {value_obj.type()} to field {final_field_name} of type nil")
+            else:
+                # Original type-checking logic
+                if field_value.type() != value_obj.type():
+                    super().error(ErrorType.TYPE_ERROR, f"Type mismatch: cannot assign {value_obj.type()} to field {final_field_name} of type {field_value.type()}")
 
-            #perform the assignment
+            # Perform the assignment
             struct_value[final_field_name] = value_obj
-        
+            
         else: #this is the regular original variable assignment:
-
             curr_val = self.env.get(var_name)
 
             #check for type coercion for when assigning bool (because can assign int to a boolean variable now)
@@ -256,8 +283,7 @@ class Interpreter(InterpreterBase):
 
             if not self.env.set(var_name, value_obj):
                 super().error(
-                    ErrorType.NAME_ERROR, f"Undefined variable {var_name} in assignment"
-                )
+                    ErrorType.NAME_ERROR, f"Undefined variable {var_name} in assignment")
 
 
     def __var_def(self, var_ast):
@@ -274,8 +300,6 @@ class Interpreter(InterpreterBase):
         if expr_ast.elem_type == InterpreterBase.NEW_NODE:
             print(f"DEBUG: Full NEW_NODE expression: {expr_ast}")
             struct_type = expr_ast.get("var_type")
-            if struct_type is None:
-                print(f"DEBUG: struct_type for NEW_NODE is {struct_type}")
             if struct_type not in self.struct_name_to_def:
                 super().error(ErrorType.TYPE_ERROR, f"Undefined struct type of {struct_type}")
             fields = {}
@@ -292,10 +316,10 @@ class Interpreter(InterpreterBase):
                 elif field_type in self.struct_name_to_def: #this checks if it is a struct type (one of the valid types)
                     fields[field_name] = Value(Type.NIL, None)
                 else:
-                    super().error(ErrorType.TYPE_ERROR, f"Invlaid field type {field_type}")
-            return Value(struct_type, fields) #returning a Value object that represents the new struct instance
+                    super().error(ErrorType.TYPE_ERROR, f"Invalid field type {field_type}")
+            return Value(struct_type, fields) #returning a Value object that represents the new struct instance!! (this is important because fixes error of accessing raw dict instances)
         
-        #also now have to handle accessing struct fields using the dot operator
+        #Variable nodes: also now have to handle accessing struct fields using the dot operator
         if expr_ast.elem_type == InterpreterBase.VAR_NODE:
             var_name = expr_ast.get("name")
             #check if this is a field access that uses the dot operator notaiton
@@ -311,22 +335,59 @@ class Interpreter(InterpreterBase):
                     super().error(ErrorType.TYPE_ERROR, f"{base_var_name} is not a struct!")
                 if base_var.value() is None:
                     super().error(ErrorType.FAULT_ERROR, f"Variable{base_var_name} is nil")
-
+                '''
                 #traverse through te fields
                 struct_value = base_var.value()
                 for field_name in field_names:
                     if field_name not in struct_value:
                         super().error(ErrorType.NAME_ERROR, f"Field {field_name} is not found in the struct {base_var.type()}")
-                    struct_value = struct_value[field_name]
-                
-                return struct_value
+                    struct_value = struct_value[field_name] #get the field value
+                    if isinstance(struct_value, Value): 
+                        struct_value = struct_value.value()  # Unwrap the Value to access the actual content if the field value is another struct
 
-            else:
-                #just the regular variable node access from below
-                val = self.env.get(var_name)
-                if val is None:
-                    super().error(ErrorType.NAME_ERROR, f"Variable {var_name} not found")
-                return val
+                
+                 # Wrap the final value in a Value object before returning
+                if not isinstance(struct_value, Value):
+                    struct_value = Value(base_var.type(), struct_value)
+
+                return struct_value'''
+                # Traverse through the fields
+                #struct_value = base_var.value()
+                #Citation: The following code is from ChatGPT
+                struct_value = base_var
+                for field_name in field_names:
+                    if not isinstance(struct_value, Value):
+                        super().error(ErrorType.TYPE_ERROR, f"Expected a Value object, got {type(struct_value)}")
+                    
+                    # Unwrap to access underlying struct or value map (dictionary of fields)
+                    struct_data = struct_value.value()
+                    if not isinstance(struct_data, dict):  # Ensure you are working with a dictionary
+                        super().error(ErrorType.TYPE_ERROR, f"Expected a struct dictionary, got {type(struct_data)}")
+                    
+                    if field_name not in struct_data:
+                        super().error(ErrorType.NAME_ERROR, f"Field {field_name} is not found in the struct {struct_value.type()}")
+                # End of copied code   
+                    # Ensure struct_value remains a Value for the next iteration (if applicable)
+                    #if not isinstance(struct_value, Value):
+                        #struct_value = Value(struct_value.type(), struct_value)
+
+                    
+                    struct_value = struct_data[field_name]  # Move to the next field (which should be another Value)
+
+                # Return the final field's value
+                if not isinstance(struct_value, Value):
+                    super().error(ErrorType.TYPE_ERROR, f"Expected a Value object, got {type(struct_value)}")
+                return struct_value
+            
+            #just the regular variable node access from below
+            val = self.env.get(var_name)
+            if val is None:
+                super().error(ErrorType.NAME_ERROR, f"Variable {var_name} not found")
+
+            if not isinstance(val, Value):
+                print(f"DEBUG: Unexpected type in __eval_expr for var {var_name}: {type(val)}")
+                super().error(ErrorType.TYPE_ERROR, "Expected Value object")
+            return val
 
 
         if expr_ast.elem_type == InterpreterBase.NIL_NODE:
@@ -346,6 +407,8 @@ class Interpreter(InterpreterBase):
             return self.__eval_unary(expr_ast, Type.INT, lambda x: -1 * x)
         if expr_ast.elem_type == Interpreter.NOT_NODE:
             return self.__eval_unary(expr_ast, Type.BOOL, lambda x: not x)
+        
+        super().error(ErrorType.TYPE_ERROR, "Invalid expression node")
 
     def __eval_op(self, arith_ast):
         left_value_obj = self.__eval_expr(arith_ast.get("op1"))
@@ -562,16 +625,24 @@ class Interpreter(InterpreterBase):
 def main():
 
     program_source1 = """
-    struct cat {
+    struct person {
     name: string;
-    scratches: bool;
+    age: int;
+    }
+
+    struct house {
+    owner: person;
+    address: string;
     }
 
     func main() : void {
-    var c: cat;
-    c = new cat;
-    print(c.name); 
-    print(c.scratches); 
+    var h: house;
+    h = new house;
+    h.owner = new person;
+    h.owner.name = "Alice";
+    h.owner.age = 30;
+    print(h.owner.name); 
+    print(h.owner.age); 
     }
     """
     interpreter = Interpreter()

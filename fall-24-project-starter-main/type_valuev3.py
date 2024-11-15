@@ -13,7 +13,7 @@ class Type:
 
 # Represents a value, which has a type and its value
 class Value:
-    def __init__(self, type, value=None):
+    def __init__(self, type, value=None): 
         self.t = type
         self.v = value
 
@@ -48,4 +48,9 @@ def get_printable(val):
         if val.value() is True:
             return "true"
         return "false"
-    return None
+    if val.type() == Type.NIL:
+        return "nil"
+    # Handle unexpected types
+    print(f"DEBUG: Encountered unknown type: {val.type()}, value: {val.value()}")
+    return "<unknown type>"  # You could also raise an error here if desired
+    #return None
