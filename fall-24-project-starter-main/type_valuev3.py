@@ -10,7 +10,6 @@ class Type:
     STRING = "string"
     NIL = "nil"
 
-
 # Represents a value, which has a type and its value
 class Value:
     def __init__(self, type, value=None): 

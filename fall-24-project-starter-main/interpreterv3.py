@@ -226,10 +226,10 @@ class Interpreter(InterpreterBase):
             base_var = self.env.get(base_var_name)
             if base_var is None:
                 super().error(ErrorType.NAME_ERROR, f"Variable {base_var_name} is not found")
-            if base_var.type() not in self.struct_name_to_def:
-                super().error(ErrorType.TYPE_ERROR, f"{base_var_name}is not a struct!")
             if base_var.value() is None:
                 super().error(ErrorType.FAULT_ERROR, f"Variable {base_var_name} is nil")
+            if base_var.type() not in self.struct_name_to_def:
+                super().error(ErrorType.TYPE_ERROR, f"{base_var_name}is not a struct!")
 
             #traverse through the fields to find the correct field
             # Citation: The following code was from ChatGPT
@@ -276,6 +276,11 @@ class Interpreter(InterpreterBase):
             #check for type coercion for when assigning bool (because can assign int to a boolean variable now)
             if curr_val.type() == Type.BOOL and value_obj.type() == Type.INT:
                 value_obj = self.__do_int_to_bool_coercion(value_obj)
+
+            #also check for assigning nil (if var to left of dot is nil) -- fix test_assign_nil.br
+            if value_obj.type() == Type.NIL and curr_val.type() in self.struct_name_to_def:
+                self.env.set(var_name, value_obj)
+                return
 
             # doing static type checking:
             if curr_val.type() != value_obj.type():
@@ -331,10 +336,11 @@ class Interpreter(InterpreterBase):
                 base_var = self.env.get(base_var_name)
                 if base_var is None:
                     super().error(ErrorType.NAME_ERROR, f"Variable {base_var_name} is not found")
-                if base_var.type() not in self.struct_name_to_def:
-                    super().error(ErrorType.TYPE_ERROR, f"{base_var_name} is not a struct!")
                 if base_var.value() is None:
                     super().error(ErrorType.FAULT_ERROR, f"Variable{base_var_name} is nil")
+                if base_var.type() not in self.struct_name_to_def:
+                    super().error(ErrorType.TYPE_ERROR, f"{base_var_name} is not a struct!")
+                
                 '''
                 #traverse through te fields
                 struct_value = base_var.value()
@@ -400,7 +406,13 @@ class Interpreter(InterpreterBase):
             return Value(Type.BOOL, expr_ast.get("val"))
         #moved var_node up to handle with the struct dot operator access
         if expr_ast.elem_type == InterpreterBase.FCALL_NODE:
-            return self.__call_func(expr_ast)
+            # Call the function and get the return value
+            return_val = self.__call_func(expr_ast)
+            print(f"return value type {return_val.type()}")
+            # Check if the function has a void return type and is used as part of an expression
+            if return_val.type() == Type.NIL:
+                super().error(ErrorType.TYPE_ERROR, "Cannot use a void function in an expression")
+            return return_val
         if expr_ast.elem_type in Interpreter.BIN_OPS:
             return self.__eval_op(expr_ast)
         if expr_ast.elem_type == Interpreter.NEG_NODE:
@@ -413,6 +425,26 @@ class Interpreter(InterpreterBase):
     def __eval_op(self, arith_ast):
         left_value_obj = self.__eval_expr(arith_ast.get("op1"))
         right_value_obj = self.__eval_expr(arith_ast.get("op2"))
+
+        #have to check if either is void type --> error
+        #print(f"DEBUG: left value type: {left_value_obj.type()} rigth type {right_value_obj.type()}")
+        #if left_value_obj.type() == Type.NIL or right_value_obj.type() == Type.NIL:
+            #super().error(ErrorType.TYPE_ERROR, "Cannot compare with void types")
+        
+        if left_value_obj.type() == Type.NIL or right_value_obj.type() == Type.NIL:
+            # Ensure comparison is only allowed if the other value is a struct or nil itself
+            if not ((left_value_obj.type() in self.struct_name_to_def or left_value_obj.type() == Type.NIL) and
+                    (right_value_obj.type() in self.struct_name_to_def or right_value_obj.type() == Type.NIL)):
+                super().error(ErrorType.TYPE_ERROR, "Only structs or nil may be compared with nil")
+
+            # Allow comparisons using == and != for structs and nil
+            if arith_ast.elem_type in {"==", "!="}:
+                result = (left_value_obj.type() == right_value_obj.type() and left_value_obj.value() == right_value_obj.value()) if arith_ast.elem_type == "==" else (left_value_obj.type() != right_value_obj.type() or left_value_obj.value() != right_value_obj.value())
+                return Value(Type.BOOL, result)
+            else:
+                # Disallow any other operations involving nil
+                super().error(ErrorType.TYPE_ERROR, "Invalid operation with nil")
+
 
         #first, coerce int to bool for the logical operations of && and || 
         if arith_ast.elem_type in {"&&", "||"}:
