@@ -64,9 +64,11 @@ class Interpreter(InterpreterBase):
         for func_def in ast.get("functions"):
             func_name = func_def.get("name")
             num_params = len(func_def.get("args"))
+
             if func_name not in self.func_name_to_ast:
                 self.func_name_to_ast[func_name] = {}
             self.func_name_to_ast[func_name][num_params] = func_def
+
 
     def __get_func_by_name(self, name, num_params):
         if name not in self.func_name_to_ast:
@@ -126,6 +128,12 @@ class Interpreter(InterpreterBase):
 
         func_ast = self.__get_func_by_name(func_name, len(actual_args))
         formal_args = func_ast.get("args")
+
+        # Validate return type only if specified; it may be None
+        return_type = func_ast.get("return_type")
+        if return_type is None:
+            super().error(ErrorType.TYPE_ERROR, f"Function {func_name} has no defined return type")
+
         if len(actual_args) != len(formal_args):
             super().error(
                 ErrorType.NAME_ERROR,
@@ -140,6 +148,21 @@ class Interpreter(InterpreterBase):
         for formal_ast, actual_ast in zip(formal_args, actual_args):
             result = copy.copy(self.__eval_expr(actual_ast))
             expected_type = formal_ast.get("var_type") #wait check this var_type or return_type
+
+            # Allow nil for struct types
+            if expected_type in self.struct_name_to_def and result.type() == Type.NIL:
+                # Allow nil to be assigned to struct type arguments
+                pass
+            elif expected_type == Type.BOOL and result.type() == Type.INT:
+                # if expected type is bool, call coercion function to coerce int --> bool
+                result = self.__do_int_to_bool_coercion(result)
+            
+            # Also check for type compatibility after coercion
+            if result.type() != expected_type:
+                super().error(ErrorType.TYPE_ERROR, f"Function {func_name} has an expected return type of {expected_type} but seems to be actually {result.type()}")
+            arg_name = formal_ast.get("name")
+            args[arg_name] = result
+#end of added
 
             # if expected type is bool, call coercion function to coerce int --> bool
             if expected_type == Type.BOOL and result.type() == Type.INT:
@@ -226,10 +249,12 @@ class Interpreter(InterpreterBase):
             base_var = self.env.get(base_var_name)
             if base_var is None:
                 super().error(ErrorType.NAME_ERROR, f"Variable {base_var_name} is not found")
-            if base_var.value() is None:
-                super().error(ErrorType.FAULT_ERROR, f"Variable {base_var_name} is nil")
             if base_var.type() not in self.struct_name_to_def:
                 super().error(ErrorType.TYPE_ERROR, f"{base_var_name}is not a struct!")
+            if base_var.value() is None:
+                print(f"DEBUG: Attempting to access fields of a nil struct {base_var_name}")
+                super().error(ErrorType.FAULT_ERROR, f"Variable {base_var_name} is nil")
+            
 
             #traverse through the fields to find the correct field
             # Citation: The following code was from ChatGPT
@@ -295,6 +320,20 @@ class Interpreter(InterpreterBase):
         var_name = var_ast.get("name")
         #add variable type!
         var_type = var_ast.get("var_type") # var_type is the second key in vardef statement node's dictionary
+        
+        #check if variable is a user defined struct
+        if var_type in self.struct_name_to_def:
+            #then initialize default nil value to the structs
+            default_value = Value(Type.NIL, None)
+        elif var_type == Type.INT:
+            default_value = Value(Type.INT, 0)
+        elif var_type == Type.STRING:
+            default_value = Value(Type.STRING, "") 
+        elif var_type == Type.BOOL:
+            default_value = Value(Type.BOOL, False)
+        else:
+            super().error(ErrorType.TYPE_ERROR, f"Invalid type for variable {var_name}")
+        
         if not self.env.create(var_name, Value(var_type, None)):
             super().error(
                 ErrorType.NAME_ERROR, f"Duplicate definition for variable {var_name}"
@@ -304,6 +343,8 @@ class Interpreter(InterpreterBase):
         # add the handling for the struct isntances --> use 'new' to create new struct instances
         if expr_ast.elem_type == InterpreterBase.NEW_NODE:
             print(f"DEBUG: Full NEW_NODE expression: {expr_ast}")
+            print(f"DEBUG: Creating new struct of type {expr_ast.get('var_type')}")
+
             struct_type = expr_ast.get("var_type")
             if struct_type not in self.struct_name_to_def:
                 super().error(ErrorType.TYPE_ERROR, f"Undefined struct type of {struct_type}")
@@ -334,12 +375,17 @@ class Interpreter(InterpreterBase):
                 field_names = parts[1:]
                 #get base variable -- struct isntance
                 base_var = self.env.get(base_var_name)
+                print(f"DEBUG: Trying to access base variable '{base_var_name}' from environment.")
                 if base_var is None:
                     super().error(ErrorType.NAME_ERROR, f"Variable {base_var_name} is not found")
-                if base_var.value() is None:
-                    super().error(ErrorType.FAULT_ERROR, f"Variable{base_var_name} is nil")
+                
                 if base_var.type() not in self.struct_name_to_def:
-                    super().error(ErrorType.TYPE_ERROR, f"{base_var_name} is not a struct!")
+                    super().error(ErrorType.TYPE_ERROR, f"{base_var_name} is not a struct, cannot access field!")
+                
+                if base_var.value() is None:
+                    print(f"DEBUG: base_var '{base_var_name}' retrieved as nil. Type: {base_var.type()}. Potential Issue: Was it created or set properly?")
+                    super().error(ErrorType.FAULT_ERROR, f"Variable{base_var_name} is nil (in eval_expr)")
+               
                 
                 '''
                 #traverse through te fields
@@ -387,6 +433,7 @@ class Interpreter(InterpreterBase):
             
             #just the regular variable node access from below
             val = self.env.get(var_name)
+            print(f"DEBUG: Retrieved '{var_name}' from environment: {val}")
             if val is None:
                 super().error(ErrorType.NAME_ERROR, f"Variable {var_name} not found")
 
@@ -631,7 +678,8 @@ class Interpreter(InterpreterBase):
                     return (ExecStatus.RETURN, Value(Type.BOOL, False)) #bool default value is False
                 elif func_return_type == Type.NIL:
                     return (ExecStatus.RETURN, Interpreter.NIL_VALUE) #we refer to nil value with NIL_VALUE instead of None? check this
- 
+                elif func_return_type is None:
+                    super().error(ErrorType.TYPE_ERROR, "Return type is undefined for this function")
             return (ExecStatus.RETURN, Interpreter.NIL_VALUE)
 
         value_obj = copy.copy(self.__eval_expr(expr_ast))
@@ -671,7 +719,7 @@ def main():
     var h: house;
     h = new house;
     h.owner = new person;
-    h.owner.name = "Alice";
+    h.owner.name = "Jennifer";
     h.owner.age = 30;
     print(h.owner.name); 
     print(h.owner.age); 
