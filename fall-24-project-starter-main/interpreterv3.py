@@ -52,7 +52,6 @@ class Interpreter(InterpreterBase):
 
     def validate_structs(self):
         for struct_name, struct_def in self.struct_name_to_def.items():
-            print(f"DEBUG: Struct {struct_name} defined with fields {struct_def.get('fields')}")
             for field in struct_def.get("fields"):
                 field_type = field.get("var_type")
                 #now check if field type is a vlaid primitive (int, bool, string) or previously defined struct
@@ -150,27 +149,22 @@ class Interpreter(InterpreterBase):
             expected_type = formal_ast.get("var_type") #wait check this var_type or return_type
 
             # Allow nil for struct types
-            if expected_type in self.struct_name_to_def and result.type() == Type.NIL:
-                # Allow nil to be assigned to struct type arguments
-                pass
-            elif expected_type == Type.BOOL and result.type() == Type.INT:
+            if expected_type in self.struct_name_to_def:
+                #if expectec type is struct, allow nil values to be passed
+                if result.type() == Type.NIL:
+                    pass #allow nil assignment ot structs
+                elif result.type() != expected_type:
+                    #error, types have to match
+                    super().error(ErrorType.TYPE_ERROR, f"Function {func_name} has an expected return type of {expected_type} but seems to be actually {result.type()}")
+            
+            else: #for non-struct types
                 # if expected type is bool, call coercion function to coerce int --> bool
-                result = self.__do_int_to_bool_coercion(result)
+                if expected_type == Type.BOOL and result.type() == Type.INT:
+                    result = self.__do_int_to_bool_coercion(result)
+                #also have to check for type compatilbity after coercin
+                if result.type() != expected_type:
+                    super().error(ErrorType.TYPE_ERROR,f"Function {func_name} has an expected return type of {expected_type} but seems to be actually {result.type()}")
             
-            # Also check for type compatibility after coercion
-            if result.type() != expected_type:
-                super().error(ErrorType.TYPE_ERROR, f"Function {func_name} has an expected return type of {expected_type} but seems to be actually {result.type()}")
-            arg_name = formal_ast.get("name")
-            args[arg_name] = result
-#end of added
-
-            # if expected type is bool, call coercion function to coerce int --> bool
-            if expected_type == Type.BOOL and result.type() == Type.INT:
-                result = self.__do_int_to_bool_coercion(result)
-            
-            #also have to check for type compatilbity after coercin
-            if result.type() != expected_type:
-                super().error(ErrorType.TYPE_ERROR,f"Function {func_name} has an expected return type of {expected_type} but seems to be actually {result.type()}")
             arg_name = formal_ast.get("name")
             args[arg_name] = result
 
@@ -179,6 +173,8 @@ class Interpreter(InterpreterBase):
         # and add the formal arguments to the activation record
         for arg_name, value in args.items():
           self.env.create(arg_name, value)
+        
+        #execute function body
         status, return_val = self.__run_statements(func_ast.get("statements")) #instead of _ add variable status bc we need it for checking default return 
         self.env.pop_func()
 
@@ -194,7 +190,7 @@ class Interpreter(InterpreterBase):
                 return Value(Type.STRING, "") #string default value is ""
             elif func_return_type == Type.BOOL:
                 return Value(Type.BOOL, False) #bool default value is False
-            elif func_return_type == Type.NIL:
+            elif func_return_type in self.struct_name_to_def:
                 return Interpreter.NIL_VALUE #we refer to nil value with NIL_VALUE instead of None? check this
 
         return return_val
@@ -206,7 +202,7 @@ class Interpreter(InterpreterBase):
             result = self.__eval_expr(arg)  # result is a Value object
 
             if not isinstance(result, Value):
-                print(f"DEBUG: Expected Value object but got {type(result)}")
+                #print(f"DEBUG: Expected Value object but got {type(result)}")
                 super().error(ErrorType.TYPE_ERROR, "Expectd a Value object in the print funciotn")
             # for brewin++ have to check if the value is None or nil type
             if result.type() == Type.NIL or result.value() is None:
@@ -235,7 +231,7 @@ class Interpreter(InterpreterBase):
         if name == "inputs":
             return Value(Type.STRING, inp)
 
-    def __assign(self, assign_ast):
+    '''def __assign(self, assign_ast):
         var_name = assign_ast.get("name")
         value_obj = self.__eval_expr(assign_ast.get("expression"))
 
@@ -252,7 +248,7 @@ class Interpreter(InterpreterBase):
             if base_var.type() not in self.struct_name_to_def:
                 super().error(ErrorType.TYPE_ERROR, f"{base_var_name}is not a struct!")
             if base_var.value() is None:
-                print(f"DEBUG: Attempting to access fields of a nil struct {base_var_name}")
+                #print(f"DEBUG: Attempting to access fields of a nil struct {base_var_name}")
                 super().error(ErrorType.FAULT_ERROR, f"Variable {base_var_name} is nil")
             
 
@@ -275,10 +271,6 @@ class Interpreter(InterpreterBase):
             if final_field_name not in struct_value:
                 super().error(ErrorType.NAME_ERROR, f"Field {final_field_name} not found in struct {base_var.type()}")
             field_value = struct_value[final_field_name]
-            '''struct_value_dict = struct_value # Access the dictionary of fields
-            if final_field_name not in struct_value_dict:
-                super().error(ErrorType.NAME_ERROR, f"Field {final_field_name} not found in struct {base_var.type()}")
-            field_value = struct_value[final_field_name]'''
 
             # Handle case where the field is nil (uninitialized struct field)
             if field_value.type() == Type.NIL:
@@ -288,6 +280,9 @@ class Interpreter(InterpreterBase):
                 else:
                     super().error(ErrorType.TYPE_ERROR, f"Cannot assign value of type {value_obj.type()} to field {final_field_name} of type nil")
             else:
+                #type coercion int->bool
+                if field_value.type() == Type.BOOL and value_obj.type() == Type.INT:
+                    value_obj = self.__do_int_to_bool_coercion(value_obj)
                 # Original type-checking logic
                 if field_value.type() != value_obj.type():
                     super().error(ErrorType.TYPE_ERROR, f"Type mismatch: cannot assign {value_obj.type()} to field {final_field_name} of type {field_value.type()}")
@@ -297,6 +292,12 @@ class Interpreter(InterpreterBase):
             
         else: #this is the regular original variable assignment:
             curr_val = self.env.get(var_name)
+
+            #allow nil transition to struct types
+            if curr_val.type() == Type.NIL and value_obj.type() in self.struct_name_to_def:
+                # Allow nil to be assigned to a valid struct instance
+                self.env.set(var_name, value_obj)
+                return
 
             #check for type coercion for when assigning bool (because can assign int to a boolean variable now)
             if curr_val.type() == Type.BOOL and value_obj.type() == Type.INT:
@@ -313,7 +314,80 @@ class Interpreter(InterpreterBase):
 
             if not self.env.set(var_name, value_obj):
                 super().error(
-                    ErrorType.NAME_ERROR, f"Undefined variable {var_name} in assignment")
+                    ErrorType.NAME_ERROR, f"Undefined variable {var_name} in assignment")'''
+    #split up assign function for better readability
+    def __assign(self, assign_ast):
+        var_name = assign_ast.get("name")
+        value_obj = self.__eval_expr(assign_ast.get("expression"))
+
+        if '.' in var_name:
+            self.__assign_to_struct_field(var_name, value_obj)
+        else:
+            self.__assign_to_variable(var_name, value_obj)
+
+    #assignment logic for structs
+    def __assign_to_struct_field(self, var_name, value_obj):
+        parts = var_name.split('.')
+        base_var_name = parts[0]
+        field_names = parts[1:]
+
+        base_var = self.env.get(base_var_name)
+        if base_var is None:
+            super().error(ErrorType.NAME_ERROR, f"Variable {base_var_name} is not found")
+        if base_var.type() not in self.struct_name_to_def:
+            super().error(ErrorType.TYPE_ERROR, f"{base_var_name} is not a struct!")
+        if base_var.value() is None:
+            super().error(ErrorType.FAULT_ERROR, f"Variable {base_var_name} is nil")
+
+        struct_value = base_var.value()
+        for field_name in field_names[:-1]:
+            if field_name not in struct_value:
+                super().error(ErrorType.NAME_ERROR, f"Field {field_name} not found in struct {base_var.type()}")
+            struct_value = struct_value[field_name]
+            if struct_value.type() not in self.struct_name_to_def:
+                super().error(ErrorType.TYPE_ERROR, f"{field_name} is not a struct")
+            if struct_value.value() is None:
+                super().error(ErrorType.FAULT_ERROR, f"Field {field_name} is nil")
+            struct_value = struct_value.value()
+
+        final_field_name = field_names[-1]
+        if final_field_name not in struct_value:
+            super().error(ErrorType.NAME_ERROR, f"Field {final_field_name} not found in struct {base_var.type()}")
+        field_value = struct_value[final_field_name]
+
+        if field_value.type() == Type.NIL:
+            if value_obj.type() in self.struct_name_to_def:
+                struct_value[final_field_name] = value_obj
+            else:
+                super().error(ErrorType.TYPE_ERROR, f"Cannot assign value of type {value_obj.type()} to field {final_field_name} of type nil")
+        else:
+            if field_value.type() == Type.BOOL and value_obj.type() == Type.INT:
+                value_obj = self.__do_int_to_bool_coercion(value_obj)
+            if field_value.type() != value_obj.type():
+                super().error(ErrorType.TYPE_ERROR, f"Type mismatch: cannot assign {value_obj.type()} to field {final_field_name} of type {field_value.type()}")
+
+        struct_value[final_field_name] = value_obj
+
+    #regular variable assignment 
+    def __assign_to_variable(self, var_name, value_obj):
+        curr_val = self.env.get(var_name)
+
+        if curr_val.type() == Type.NIL and value_obj.type() in self.struct_name_to_def:
+            self.env.set(var_name, value_obj)
+            return
+
+        if curr_val.type() == Type.BOOL and value_obj.type() == Type.INT:
+            value_obj = self.__do_int_to_bool_coercion(value_obj)
+
+        if value_obj.type() == Type.NIL and curr_val.type() in self.struct_name_to_def:
+            self.env.set(var_name, value_obj)
+            return
+
+        if curr_val.type() != value_obj.type():
+            super().error(ErrorType.TYPE_ERROR, f"Types are not the same! {var_name} is {curr_val.type()} but got {value_obj.type()}")
+
+        if not self.env.set(var_name, value_obj):
+            super().error(ErrorType.NAME_ERROR, f"Undefined variable {var_name} in assignment")
 
 
     def __var_def(self, var_ast):
@@ -334,7 +408,8 @@ class Interpreter(InterpreterBase):
         else:
             super().error(ErrorType.TYPE_ERROR, f"Invalid type for variable {var_name}")
         
-        if not self.env.create(var_name, Value(var_type, None)):
+        #if not self.env.create(var_name, Value(var_type, None)):
+        if not self.env.create(var_name, default_value):
             super().error(
                 ErrorType.NAME_ERROR, f"Duplicate definition for variable {var_name}"
             )
@@ -342,8 +417,8 @@ class Interpreter(InterpreterBase):
     def __eval_expr(self, expr_ast):
         # add the handling for the struct isntances --> use 'new' to create new struct instances
         if expr_ast.elem_type == InterpreterBase.NEW_NODE:
-            print(f"DEBUG: Full NEW_NODE expression: {expr_ast}")
-            print(f"DEBUG: Creating new struct of type {expr_ast.get('var_type')}")
+            #print(f"DEBUG: Full NEW_NODE expression: {expr_ast}")
+            #print(f"DEBUG: Creating new struct of type {expr_ast.get('var_type')}")
 
             struct_type = expr_ast.get("var_type")
             if struct_type not in self.struct_name_to_def:
@@ -375,7 +450,7 @@ class Interpreter(InterpreterBase):
                 field_names = parts[1:]
                 #get base variable -- struct isntance
                 base_var = self.env.get(base_var_name)
-                print(f"DEBUG: Trying to access base variable '{base_var_name}' from environment.")
+                #print(f"DEBUG: Trying to access base variable '{base_var_name}' from environment.")
                 if base_var is None:
                     super().error(ErrorType.NAME_ERROR, f"Variable {base_var_name} is not found")
                 
@@ -383,7 +458,7 @@ class Interpreter(InterpreterBase):
                     super().error(ErrorType.TYPE_ERROR, f"{base_var_name} is not a struct, cannot access field!")
                 
                 if base_var.value() is None:
-                    print(f"DEBUG: base_var '{base_var_name}' retrieved as nil. Type: {base_var.type()}. Potential Issue: Was it created or set properly?")
+                    #print(f"DEBUG: base_var '{base_var_name}' retrieved as nil. Type: {base_var.type()}. Potential Issue: Was it created or set properly?")
                     super().error(ErrorType.FAULT_ERROR, f"Variable{base_var_name} is nil (in eval_expr)")
                
                 
@@ -433,12 +508,12 @@ class Interpreter(InterpreterBase):
             
             #just the regular variable node access from below
             val = self.env.get(var_name)
-            print(f"DEBUG: Retrieved '{var_name}' from environment: {val}")
+            #print(f"DEBUG: Retrieved '{var_name}' from environment: {val}")
             if val is None:
                 super().error(ErrorType.NAME_ERROR, f"Variable {var_name} not found")
 
             if not isinstance(val, Value):
-                print(f"DEBUG: Unexpected type in __eval_expr for var {var_name}: {type(val)}")
+                #print(f"DEBUG: Unexpected type in __eval_expr for var {var_name}: {type(val)}")
                 super().error(ErrorType.TYPE_ERROR, "Expected Value object")
             return val
 
@@ -452,6 +527,7 @@ class Interpreter(InterpreterBase):
         if expr_ast.elem_type == InterpreterBase.BOOL_NODE:
             return Value(Type.BOOL, expr_ast.get("val"))
         #moved var_node up to handle with the struct dot operator access
+
         if expr_ast.elem_type == InterpreterBase.FCALL_NODE:
             # Call the function and get the return value
             return_val = self.__call_func(expr_ast)
@@ -459,6 +535,8 @@ class Interpreter(InterpreterBase):
             # Check if the function has a void return type and is used as part of an expression
             if return_val.type() == Type.NIL:
                 super().error(ErrorType.TYPE_ERROR, "Cannot use a void function in an expression")
+
+
             return return_val
         if expr_ast.elem_type in Interpreter.BIN_OPS:
             return self.__eval_op(expr_ast)
@@ -676,6 +754,8 @@ class Interpreter(InterpreterBase):
                     return (ExecStatus.RETURN, Value(Type.STRING, "")) #string default value is ""
                 elif func_return_type == Type.BOOL:
                     return (ExecStatus.RETURN, Value(Type.BOOL, False)) #bool default value is False
+                elif func_return_type in self.struct_name_to_def:
+                    return (ExecStatus.RETURN, Interpreter.NIL_VALUE)
                 elif func_return_type == Type.NIL:
                     return (ExecStatus.RETURN, Interpreter.NIL_VALUE) #we refer to nil value with NIL_VALUE instead of None? check this
                 elif func_return_type is None:
@@ -686,6 +766,10 @@ class Interpreter(InterpreterBase):
 
         if self.return_type_stack:
             func_return_type = self.return_type_stack[-1]
+            #check if a struct type allows returning nil
+            if func_return_type in self.struct_name_to_def and value_obj.type() == Type.NIL:
+                return (ExecStatus.RETURN, value_obj)
+
             # do coercion from int to bool if the function's return type is bool
             if func_return_type == Type.BOOL and value_obj.type() == Type.INT:
                 value_obj = self.__do_int_to_bool_coercion(value_obj)
