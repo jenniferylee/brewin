@@ -64,6 +64,23 @@ class Interpreter(InterpreterBase):
             func_name = func_def.get("name")
             num_params = len(func_def.get("args"))
 
+            #validate return type? undefined_ret_type case
+            return_type = func_def.get("return_type")
+            if return_type is None:
+                super().error(ErrorType.TYPE_ERROR, f"Function {func_name} has no defined return type")
+            elif return_type not in [Type.INT, Type.STRING, Type.BOOL, Type.NIL, "void"] and return_type not in self.struct_name_to_def:
+                super().error(ErrorType.TYPE_ERROR, f"Invalid return type {return_type} for function {func_name}")
+           
+            #also have to validate parameter types! for the invalid_param_type test case
+            for param in func_def.get("args"):
+                param_type = param.get("var_type")
+                if param_type is None:
+                    super().error(ErrorType.TYPE_ERROR, f"Parameter {param.get('name')} in function {func_name} has no defined type")
+                #if the type of paramter isnot one of the primitves or not self defined struct
+                elif param_type not in [Type.INT, Type.STRING, Type.BOOL] and param_type not in self. struct_name_to_def:
+                    super().error(ErrorType.TYPE_ERROR, f"Invalid parameter type {param_type} for function {func_name}")
+
+
             if func_name not in self.func_name_to_ast:
                 self.func_name_to_ast[func_name] = {}
             self.func_name_to_ast[func_name][num_params] = func_def
@@ -334,10 +351,11 @@ class Interpreter(InterpreterBase):
         base_var = self.env.get(base_var_name)
         if base_var is None:
             super().error(ErrorType.NAME_ERROR, f"Variable {base_var_name} is not found")
-        if base_var.type() not in self.struct_name_to_def:
-            super().error(ErrorType.TYPE_ERROR, f"{base_var_name} is not a struct!")
         if base_var.value() is None:
             super().error(ErrorType.FAULT_ERROR, f"Variable {base_var_name} is nil")
+        if base_var.type() not in self.struct_name_to_def:
+            super().error(ErrorType.TYPE_ERROR, f"{base_var_name} is not a struct!")
+
 
         struct_value = base_var.value()
         for field_name in field_names[:-1]:
@@ -454,30 +472,16 @@ class Interpreter(InterpreterBase):
                 if base_var is None:
                     super().error(ErrorType.NAME_ERROR, f"Variable {base_var_name} is not found")
                 
-                if base_var.type() not in self.struct_name_to_def:
-                    super().error(ErrorType.TYPE_ERROR, f"{base_var_name} is not a struct, cannot access field!")
-                
                 if base_var.value() is None:
                     #print(f"DEBUG: base_var '{base_var_name}' retrieved as nil. Type: {base_var.type()}. Potential Issue: Was it created or set properly?")
                     super().error(ErrorType.FAULT_ERROR, f"Variable{base_var_name} is nil (in eval_expr)")
+                
+                if base_var.type() not in self.struct_name_to_def:
+                    super().error(ErrorType.TYPE_ERROR, f"{base_var_name} is not a struct, cannot access field!")
+                
+              
                
-                
-                '''
-                #traverse through te fields
-                struct_value = base_var.value()
-                for field_name in field_names:
-                    if field_name not in struct_value:
-                        super().error(ErrorType.NAME_ERROR, f"Field {field_name} is not found in the struct {base_var.type()}")
-                    struct_value = struct_value[field_name] #get the field value
-                    if isinstance(struct_value, Value): 
-                        struct_value = struct_value.value()  # Unwrap the Value to access the actual content if the field value is another struct
-
-                
-                 # Wrap the final value in a Value object before returning
-                if not isinstance(struct_value, Value):
-                    struct_value = Value(base_var.type(), struct_value)
-
-                return struct_value'''
+            
                 # Traverse through the fields
                 #struct_value = base_var.value()
                 #Citation: The following code is from ChatGPT
@@ -532,12 +536,40 @@ class Interpreter(InterpreterBase):
             # Call the function and get the return value
             return_val = self.__call_func(expr_ast)
             print(f"return value type {return_val.type()}")
+
+            '''#check if return type of function is void/nil
+            if self.return_type_stack:
+                func_return_type = self.return_type_stack[-1]
+                if func_return_type in self.struct_name_to_def and return_val.type() == Type.NIL:
+                    # If the return type is a struct and nil is returned, allow it
+                    return return_val
+
             # Check if the function has a void return type and is used as part of an expression
             if return_val.type() == Type.NIL:
                 super().error(ErrorType.TYPE_ERROR, "Cannot use a void function in an expression")
 
+            return return_val'''
+            # Check if the function has a void/nil return type but was used in an invalid way
+            if return_val.type() == Type.NIL:
+                # Check if the function return type was a struct or explicitly expected to be nil
+                print("check")
+                if self.return_type_stack:
+                    func_return_type = self.return_type_stack[-1]
+                    print(f"nil return type's function {func_return_type}")
+                    if func_return_type in self.struct_name_to_def:
+                        # Allow usage since structs can return nil
+                        return return_val
+                    # If it's a void/nil but the function has a non-struct expected return type
+                    elif func_return_type == Type.NIL:
+                        # Allow usage in expressions if it's explicitly of nil type
+                        return return_val
 
-            return return_val
+                # If it reached here, it's an invalid usage of a void function in an expression
+                #super().error(ErrorType.TYPE_ERROR, "Cannot use a void function in an expression")
+
+            return return_val 
+
+        
         if expr_ast.elem_type in Interpreter.BIN_OPS:
             return self.__eval_op(expr_ast)
         if expr_ast.elem_type == Interpreter.NEG_NODE:
@@ -569,6 +601,17 @@ class Interpreter(InterpreterBase):
             else:
                 # Disallow any other operations involving nil
                 super().error(ErrorType.TYPE_ERROR, "Invalid operation with nil")
+            
+        #also handle struct comparisons!
+        #Citation: following code generated by ChatGPT
+        if left_value_obj.type() in self.struct_name_to_def and right_value_obj.type() in self.struct_name_to_def:
+            if left_value_obj.type() != right_value_obj.type():
+                super().error(ErrorType.TYPE_ERROR, "Cannot compare structs of different types")
+            # Allow struct comparison logic for `==` and `!=` if they are of the same type
+            if arith_ast.elem_type in {"==", "!="}:
+                result = (left_value_obj.value() == right_value_obj.value()) if arith_ast.elem_type == "==" else (left_value_obj.value() != right_value_obj.value())
+                return Value(Type.BOOL, result)
+        #end of copied code
 
 
         #first, coerce int to bool for the logical operations of && and || 
@@ -614,6 +657,12 @@ class Interpreter(InterpreterBase):
 
     def __eval_unary(self, arith_ast, t, f):
         value_obj = self.__eval_expr(arith_ast.get("op1"))
+
+        #coercion int->bool
+        if t == Type.BOOL and value_obj.type() == Type.INT:
+            value_obj = self.__do_int_to_bool_coercion(value_obj)
+    
+
         if value_obj.type() != t:
             super().error(
                 ErrorType.TYPE_ERROR,
@@ -755,6 +804,7 @@ class Interpreter(InterpreterBase):
                 elif func_return_type == Type.BOOL:
                     return (ExecStatus.RETURN, Value(Type.BOOL, False)) #bool default value is False
                 elif func_return_type in self.struct_name_to_def:
+                    print("we here")
                     return (ExecStatus.RETURN, Interpreter.NIL_VALUE)
                 elif func_return_type == Type.NIL:
                     return (ExecStatus.RETURN, Interpreter.NIL_VALUE) #we refer to nil value with NIL_VALUE instead of None? check this
@@ -789,24 +839,30 @@ class Interpreter(InterpreterBase):
 def main():
 
     program_source1 = """
-    struct person {
-    name: string;
-    age: int;
+    struct dog {
+    bark: int;
+    bite: int;
     }
 
-    struct house {
-    owner: person;
-    address: string;
+    func bar() : int {
+    return;  /* no return value specified - returns 0 */
+    }
+
+    func bletch() : bool {
+    print("hi");
+    /* no explicit return; bletch must return default bool of false */
+    }
+
+    func boing() : dog {
+    return;  /* returns nil */
     }
 
     func main() : void {
-    var h: house;
-    h = new house;
-    h.owner = new person;
-    h.owner.name = "Jennifer";
-    h.owner.age = 30;
-    print(h.owner.name); 
-    print(h.owner.age); 
+    var val: int;
+    val = bar();
+    print(val);  /* prints 0 */
+    print(bletch());  /*prints false */
+    print(boing());  /*prints nil */
     }
     """
     interpreter = Interpreter()
