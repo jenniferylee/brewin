@@ -201,7 +201,9 @@ class Interpreter(InterpreterBase):
         #now, have to check for if we need to return default return value!
         if status != ExecStatus.RETURN:
             func_return_type = func_ast.get("return_type")
-            if func_return_type == Type.INT:
+            if func_return_type == "void":
+                return Value(Type.VOID)
+            elif func_return_type == Type.INT:
                 return Value(Type.INT, 0) #int default value is 0
             elif func_return_type == Type.STRING:
                 return Value(Type.STRING, "") #string default value is ""
@@ -248,90 +250,6 @@ class Interpreter(InterpreterBase):
         if name == "inputs":
             return Value(Type.STRING, inp)
 
-    '''def __assign(self, assign_ast):
-        var_name = assign_ast.get("name")
-        value_obj = self.__eval_expr(assign_ast.get("expression"))
-
-        # now have to add the handling for the struct field access using dot operator
-        if '.' in var_name:
-            parts = var_name.split('.')
-            base_var_name = parts[0]
-            field_names = parts[1:]
-
-            #now retreieve the base variable like before -- the struct instance
-            base_var = self.env.get(base_var_name)
-            if base_var is None:
-                super().error(ErrorType.NAME_ERROR, f"Variable {base_var_name} is not found")
-            if base_var.type() not in self.struct_name_to_def:
-                super().error(ErrorType.TYPE_ERROR, f"{base_var_name}is not a struct!")
-            if base_var.value() is None:
-                #print(f"DEBUG: Attempting to access fields of a nil struct {base_var_name}")
-                super().error(ErrorType.FAULT_ERROR, f"Variable {base_var_name} is nil")
-            
-
-            #traverse through the fields to find the correct field
-            # Citation: The following code was from ChatGPT
-            struct_value = base_var.value()
-            for field_name in field_names[:-1]:
-                if field_name not in struct_value:
-                    super().error(ErrorType.NAME_ERROR, f"Field{field_name} not found in struct {base_var.type()}")
-                struct_value = struct_value[field_name]
-                if struct_value.type() not in self.struct_name_to_def:
-                    super().error(ErrorType.TYPE_ERROR, f"{field_name} not a struct")
-                if struct_value.value() is None:
-                    super().error(ErrorType.FAULT_ERROR, f"Field {field_name} is nil")
-                struct_value = struct_value.value()
-           # End of copied code
-            
-            #now you can handle the final field to be assigned
-            final_field_name = field_names[-1]
-            if final_field_name not in struct_value:
-                super().error(ErrorType.NAME_ERROR, f"Field {final_field_name} not found in struct {base_var.type()}")
-            field_value = struct_value[final_field_name]
-
-            # Handle case where the field is nil (uninitialized struct field)
-            if field_value.type() == Type.NIL:
-                # Check if the value being assigned matches the intended struct type
-                if value_obj.type() in self.struct_name_to_def:
-                    struct_value[final_field_name] = value_obj  # Perform the assignment
-                else:
-                    super().error(ErrorType.TYPE_ERROR, f"Cannot assign value of type {value_obj.type()} to field {final_field_name} of type nil")
-            else:
-                #type coercion int->bool
-                if field_value.type() == Type.BOOL and value_obj.type() == Type.INT:
-                    value_obj = self.__do_int_to_bool_coercion(value_obj)
-                # Original type-checking logic
-                if field_value.type() != value_obj.type():
-                    super().error(ErrorType.TYPE_ERROR, f"Type mismatch: cannot assign {value_obj.type()} to field {final_field_name} of type {field_value.type()}")
-
-            # Perform the assignment
-            struct_value[final_field_name] = value_obj
-            
-        else: #this is the regular original variable assignment:
-            curr_val = self.env.get(var_name)
-
-            #allow nil transition to struct types
-            if curr_val.type() == Type.NIL and value_obj.type() in self.struct_name_to_def:
-                # Allow nil to be assigned to a valid struct instance
-                self.env.set(var_name, value_obj)
-                return
-
-            #check for type coercion for when assigning bool (because can assign int to a boolean variable now)
-            if curr_val.type() == Type.BOOL and value_obj.type() == Type.INT:
-                value_obj = self.__do_int_to_bool_coercion(value_obj)
-
-            #also check for assigning nil (if var to left of dot is nil) -- fix test_assign_nil.br
-            if value_obj.type() == Type.NIL and curr_val.type() in self.struct_name_to_def:
-                self.env.set(var_name, value_obj)
-                return
-
-            # doing static type checking:
-            if curr_val.type() != value_obj.type():
-                super().error(ErrorType.TYPE_ERROR, f"Types are not the same! {var_name} is {curr_val.type()} but got {value_obj.type()}")
-
-            if not self.env.set(var_name, value_obj):
-                super().error(
-                    ErrorType.NAME_ERROR, f"Undefined variable {var_name} in assignment")'''
     #split up assign function for better readability
     def __assign(self, assign_ast):
         var_name = assign_ast.get("name")
@@ -374,6 +292,8 @@ class Interpreter(InterpreterBase):
         field_value = struct_value[final_field_name]
 
         if field_value.type() == Type.NIL:
+            # Allow assignment if the value being assigned is either a nil value or matches the expected struct type
+            #if value_obj.type() == Type.NIL or value_obj.type() == base_var.type():
             if value_obj.type() in self.struct_name_to_def:
                 struct_value[final_field_name] = value_obj
             else:
@@ -549,6 +469,8 @@ class Interpreter(InterpreterBase):
                 super().error(ErrorType.TYPE_ERROR, "Cannot use a void function in an expression")
 
             return return_val'''
+
+
             # Check if the function has a void/nil return type but was used in an invalid way
             if return_val.type() == Type.NIL:
                 # Check if the function return type was a struct or explicitly expected to be nil
@@ -556,11 +478,14 @@ class Interpreter(InterpreterBase):
                 if self.return_type_stack:
                     func_return_type = self.return_type_stack[-1]
                     print(f"nil return type's function {func_return_type}")
+                   
+
                     if func_return_type in self.struct_name_to_def:
                         # Allow usage since structs can return nil
+
                         return return_val
                     # If it's a void/nil but the function has a non-struct expected return type
-                    elif func_return_type == Type.NIL:
+                    if func_return_type == Type.NIL:
                         # Allow usage in expressions if it's explicitly of nil type
                         return return_val
 
@@ -584,7 +509,7 @@ class Interpreter(InterpreterBase):
         right_value_obj = self.__eval_expr(arith_ast.get("op2"))
 
         #have to check if either is void type --> error
-        #print(f"DEBUG: left value type: {left_value_obj.type()} rigth type {right_value_obj.type()}")
+        print(f"DEBUG: left value type: {left_value_obj.type()} rigth type {right_value_obj.type()}")
         #if left_value_obj.type() == Type.NIL or right_value_obj.type() == Type.NIL:
             #super().error(ErrorType.TYPE_ERROR, "Cannot compare with void types")
         
@@ -806,8 +731,8 @@ class Interpreter(InterpreterBase):
                 elif func_return_type in self.struct_name_to_def:
                     print("we here")
                     return (ExecStatus.RETURN, Interpreter.NIL_VALUE)
-                elif func_return_type == Type.NIL:
-                    return (ExecStatus.RETURN, Interpreter.NIL_VALUE) #we refer to nil value with NIL_VALUE instead of None? check this
+                elif func_return_type == "void":
+                    return (ExecStatus.RETURN, Value(Type.VOID)) #we refer to nil value with NIL_VALUE instead of None? check this
                 elif func_return_type is None:
                     super().error(ErrorType.TYPE_ERROR, "Return type is undefined for this function")
             return (ExecStatus.RETURN, Interpreter.NIL_VALUE)
@@ -839,31 +764,61 @@ class Interpreter(InterpreterBase):
 def main():
 
     program_source1 = """
-    struct dog {
-    bark: int;
-    bite: int;
-    }
+struct Dog {
+  name: string;
+  age: int;
+  vaccinated: bool;
+}
 
-    func bar() : int {
-    return;  /* no return value specified - returns 0 */
-    }
+func main() : void {
+  var d1: Dog;
+  var d2: Dog;
 
-    func bletch() : bool {
-    print("hi");
-    /* no explicit return; bletch must return default bool of false */
-    }
+  /* Initialize struct objects */
+  d1 = new Dog;
+  d1.name = "Buddy";
+  d1.age = 5;
+  d1.vaccinated = true;
 
-    func boing() : dog {
-    return;  /* returns nil */
-    }
+  d2 = new Dog;
+  d2.name = "Buddy";
+  d2.age = 5;
+  d2.vaccinated = true;
 
-    func main() : void {
-    var val: int;
-    val = bar();
-    print(val);  /* prints 0 */
-    print(bletch());  /*prints false */
-    print(boing());  /*prints nil */
-    }
+  var d3: Dog;
+  d3 = new Dog;
+  d3.name = "Rex";
+  d3.age = 3;
+  d3.vaccinated = false;
+
+  /* Comparison Tests */
+  print(d1 == d2);  /* Should print false, as they are different instances */
+  print(d1 != d2);  /* Should print true, as they are different instances */
+
+  print(d1 == d1);  /* Should print true, as it compares the same instance */
+  print(d1 != d3);  /* Should print true, as the structs have different values */
+
+  var d4: Dog; /* d4 is nil */
+  print(d4 == nil);  /* Should print true, d4 is nil */
+  print(d4 != nil);  /* Should print false, d4 is nil */
+
+  print(d1 == nil);  /* Should print false, d1 is not nil */
+  print(d1 != nil);   /*Should print true, d1 is not nil */
+}
+
+/*
+*OUT*
+false
+true
+true
+true
+true
+false
+false
+true
+*OUT*
+*/
+
     """
     interpreter = Interpreter()
     interpreter.run(program_source1)
