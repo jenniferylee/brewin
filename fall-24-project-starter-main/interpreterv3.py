@@ -299,6 +299,10 @@ class Interpreter(InterpreterBase):
             else:
                 super().error(ErrorType.TYPE_ERROR, f"Cannot assign value of type {value_obj.type()} to field {final_field_name} of type nil")
         else:
+            if value_obj.type() == Type.NIL:
+                #allow assigning nil to fields of struct type
+                struct_value[final_field_name] = value_obj
+                return
             if field_value.type() == Type.BOOL and value_obj.type() == Type.INT:
                 value_obj = self.__do_int_to_bool_coercion(value_obj)
             if field_value.type() != value_obj.type():
@@ -412,6 +416,9 @@ class Interpreter(InterpreterBase):
                     
                     # Unwrap to access underlying struct or value map (dictionary of fields)
                     struct_data = struct_value.value()
+                    if struct_data is None:
+                         super().error(ErrorType.FAULT_ERROR, f"Attempted to access a field on a nil value in {base_var_name}.{'.'.join(field_names)}")
+
                     if not isinstance(struct_data, dict):  # Ensure you are working with a dictionary
                         super().error(ErrorType.TYPE_ERROR, f"Expected a struct dictionary, got {type(struct_data)}")
                     
@@ -457,18 +464,9 @@ class Interpreter(InterpreterBase):
             return_val = self.__call_func(expr_ast)
             print(f"return value type {return_val.type()}")
 
-            '''#check if return type of function is void/nil
-            if self.return_type_stack:
-                func_return_type = self.return_type_stack[-1]
-                if func_return_type in self.struct_name_to_def and return_val.type() == Type.NIL:
-                    # If the return type is a struct and nil is returned, allow it
-                    return return_val
-
-            # Check if the function has a void return type and is used as part of an expression
-            if return_val.type() == Type.NIL:
-                super().error(ErrorType.TYPE_ERROR, "Cannot use a void function in an expression")
-
-            return return_val'''
+            #THIS FIXED THE VOID RETURN TEST CASE!!! HAVE TO MAKE SURE function of void type can't be used in expression where value is expected
+            if return_val.type() == Type.VOID:
+                super().error(ErrorType.TYPE_ERROR, '')
 
 
             # Check if the function has a void/nil return type but was used in an invalid way
@@ -478,11 +476,9 @@ class Interpreter(InterpreterBase):
                 if self.return_type_stack:
                     func_return_type = self.return_type_stack[-1]
                     print(f"nil return type's function {func_return_type}")
-                   
 
                     if func_return_type in self.struct_name_to_def:
                         # Allow usage since structs can return nil
-
                         return return_val
                     # If it's a void/nil but the function has a non-struct expected return type
                     if func_return_type == Type.NIL:
@@ -492,7 +488,10 @@ class Interpreter(InterpreterBase):
                 # If it reached here, it's an invalid usage of a void function in an expression
                 #super().error(ErrorType.TYPE_ERROR, "Cannot use a void function in an expression")
 
+
             return return_val 
+
+           
 
         
         if expr_ast.elem_type in Interpreter.BIN_OPS:
@@ -764,67 +763,34 @@ class Interpreter(InterpreterBase):
 def main():
 
     program_source1 = """
-struct node {
-  value: int;
-  next: node;
-}
-
-struct list {
-  head: node;
-}
-
-func create_list(): list {
-  var l: list;
-  l = new list;
-  l.head = nil;
-  return l;
-}
-
-func append(l: list, val: int): void {
-  var new_node: node;
-  new_node = new node;
-  new_node.value = val;
-  new_node.next = nil;
-
-  if (l.head == nil) {
-    l.head = new_node;
-  } else {
-    var current: node;
-    for (current = l.head; current.next != nil; current = current.next) {
-      /* It doesn't work in Barista if it's empty, so this is just a useless line */
-      print("placeholder");
-    }
-    current.next = new_node;
-  }
-  return;
-}
-
-func print_list(l: list): void {
-  var current: node;
-
-  if (l.head == nil) {
-    print("List is empty.");
-    return;
-  }
-
-  for (current = l.head; current != nil; current = current.next) {
-    print(current.value);
-  }
-  return;
-}
+struct X {i: int; b: bool; s:string;}
+struct Y {i: int; b: bool; s:string;}
+struct Z {x: X; y: Y; z: Z;}
 
 func main(): void {
-  var l: list;
-  l = create_list();
+  var v: Z;
+  v = new Z;
+  setZ(v, 42, true, "marco");
+  v.z.z.z.z = nil;
+  print("v.x.i: ", v.x.i);
+  print("v.x.b: ", v.x.b);
+  print("v.x.s: ", v.x.s);
+  print("v.y.i: ", v.y.i);
+  print("v.y.b: ", v.y.b);
+  print("v.y.s: ", v.y.s);
+  print(v.z.z.z.z.y.b);
+}
 
-  append(l, 10);
-  append(l, 20);
-  append(l, 30);
-
-  print("Printing the list:");
-  print_list(l);
-
-  return;
+func setZ(v: Z, i: int, b: bool, s:string): void {
+  v.z = v;
+  v.x = new X;
+  v.y = new Y;
+  v.z.z.z.z.z.z.x.i = i;
+  v.x.b = b;
+  v.z.z.z.z.x.s = s;
+  v.z.z.z.z.z.z.y.i = 100 - i;
+  v.y.b = !b;
+  v.z.z.z.z.y.s = s + " polo";
 }
 
     """
