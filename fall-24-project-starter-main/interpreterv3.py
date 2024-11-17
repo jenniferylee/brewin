@@ -294,7 +294,7 @@ class Interpreter(InterpreterBase):
         if field_value.type() == Type.NIL:
             # Allow assignment if the value being assigned is either a nil value or matches the expected struct type
             #if value_obj.type() == Type.NIL or value_obj.type() == base_var.type():
-            if value_obj.type() in self.struct_name_to_def:
+            if value_obj.type() in self.struct_name_to_def or value_obj.type() == Type.NIL:
                 struct_value[final_field_name] = value_obj
             else:
                 super().error(ErrorType.TYPE_ERROR, f"Cannot assign value of type {value_obj.type()} to field {final_field_name} of type nil")
@@ -764,60 +764,68 @@ class Interpreter(InterpreterBase):
 def main():
 
     program_source1 = """
-struct Dog {
-  name: string;
-  age: int;
-  vaccinated: bool;
+struct node {
+  value: int;
+  next: node;
 }
 
-func main() : void {
-  var d1: Dog;
-  var d2: Dog;
-
-  /* Initialize struct objects */
-  d1 = new Dog;
-  d1.name = "Buddy";
-  d1.age = 5;
-  d1.vaccinated = true;
-
-  d2 = new Dog;
-  d2.name = "Buddy";
-  d2.age = 5;
-  d2.vaccinated = true;
-
-  var d3: Dog;
-  d3 = new Dog;
-  d3.name = "Rex";
-  d3.age = 3;
-  d3.vaccinated = false;
-
-  /* Comparison Tests */
-  print(d1 == d2);  /* Should print false, as they are different instances */
-  print(d1 != d2);  /* Should print true, as they are different instances */
-
-  print(d1 == d1);  /* Should print true, as it compares the same instance */
-  print(d1 != d3);  /* Should print true, as the structs have different values */
-
-  var d4: Dog; /* d4 is nil */
-  print(d4 == nil);  /* Should print true, d4 is nil */
-  print(d4 != nil);  /* Should print false, d4 is nil */
-
-  print(d1 == nil);  /* Should print false, d1 is not nil */
-  print(d1 != nil);   /*Should print true, d1 is not nil */
+struct list {
+  head: node;
 }
 
-/*
-*OUT*
-false
-true
-true
-true
-true
-false
-false
-true
-*OUT*
-*/
+func create_list(): list {
+  var l: list;
+  l = new list;
+  l.head = nil;
+  return l;
+}
+
+func append(l: list, val: int): void {
+  var new_node: node;
+  new_node = new node;
+  new_node.value = val;
+  new_node.next = nil;
+
+  if (l.head == nil) {
+    l.head = new_node;
+  } else {
+    var current: node;
+    for (current = l.head; current.next != nil; current = current.next) {
+      /* It doesn't work in Barista if it's empty, so this is just a useless line */
+      print("placeholder");
+    }
+    current.next = new_node;
+  }
+  return;
+}
+
+func print_list(l: list): void {
+  var current: node;
+
+  if (l.head == nil) {
+    print("List is empty.");
+    return;
+  }
+
+  for (current = l.head; current != nil; current = current.next) {
+    print(current.value);
+  }
+  return;
+}
+
+func main(): void {
+  var l: list;
+  l = create_list();
+
+  append(l, 10);
+  append(l, 20);
+  append(l, 30);
+
+  print("Printing the list:");
+  print_list(l);
+
+  return;
+}
 
     """
     interpreter = Interpreter()
