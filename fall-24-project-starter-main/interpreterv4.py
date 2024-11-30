@@ -126,7 +126,12 @@ class Interpreter(InterpreterBase):
         output = ""
         for arg in args:
             result = self.__eval_expr(arg)  # result is a Value object
-            output = output + get_printable(result)
+
+            # Evaluate lazy values
+            if result.is_lazy:
+                result = result.evaluate(self.evaluate_expression)
+
+            output = output + get_printable(result) # converting to printable form
         super().output(output)
         return Interpreter.NIL_VALUE
 
@@ -166,6 +171,38 @@ class Interpreter(InterpreterBase):
                 ErrorType.NAME_ERROR, f"Duplicate definition for variable {var_name}"
             )
 
+    # new function for evaluating lazy values 
+    def evaluate_expression(self, ast_node, env_snapshot=None):
+        original_env = None
+        if env_snapshot is not None:
+            # Temporarily switch to the captured snapshot environment
+            original_env = self.env
+            self.env = EnvironmentManager()
+            self.env.environment = env_snapshot
+
+        try:
+            # Evaluate based on the type of AST node
+            if ast_node.elem_type == InterpreterBase.INT_NODE:
+                return Value(Type.INT, ast_node.get("val"))
+            if ast_node.elem_type == InterpreterBase.STRING_NODE:
+                return Value(Type.STRING, ast_node.get("val"))
+            if ast_node.elem_type == InterpreterBase.BOOL_NODE:
+                return Value(Type.BOOL, ast_node.get("val"))
+            if ast_node.elem_type == InterpreterBase.VAR_NODE:
+                var_name = ast_node.get("name")
+                val = self.env.get(var_name)
+                if val is None:
+                    super().error(ErrorType.NAME_ERROR, f"Variable {var_name} not found")
+                return val
+            if ast_node.elem_type in self.BIN_OPS:
+                return self.__eval_op(ast_node)
+            if ast_node.elem_type == InterpreterBase.FCALL_NODE:
+                return self.__call_func(ast_node)
+        finally:
+            if original_env is not None:
+                # Restore the original environment
+                self.env = original_env
+
     def __eval_expr(self, expr_ast):
         if expr_ast.elem_type == InterpreterBase.NIL_NODE:
             return Interpreter.NIL_VALUE
@@ -193,6 +230,14 @@ class Interpreter(InterpreterBase):
     def __eval_op(self, arith_ast):
         left_value_obj = self.__eval_expr(arith_ast.get("op1"))
         right_value_obj = self.__eval_expr(arith_ast.get("op2"))
+        
+        # Evaluate lazy operands
+        if left_value_obj.is_lazy:
+            left_value_obj = left_value_obj.evaluate(self.evaluate_expression)
+        if right_value_obj.is_lazy:
+            right_value_obj = right_value_obj.evaluate(self.evaluate_expression)
+
+        # checking for type compatibility
         if not self.__compatible_types(
             arith_ast.elem_type, left_value_obj, right_value_obj
         ):
@@ -295,6 +340,11 @@ class Interpreter(InterpreterBase):
     def __do_if(self, if_ast):
         cond_ast = if_ast.get("condition")
         result = self.__eval_expr(cond_ast)
+
+        # Evaluate lazy condition - conditionals
+        if result.is_lazy:
+            result = result.evaluate(self.evaluate_expression)
+
         if result.type() != Type.BOOL:
             super().error(
                 ErrorType.TYPE_ERROR,
@@ -321,6 +371,11 @@ class Interpreter(InterpreterBase):
         run_for = Interpreter.TRUE_VALUE
         while run_for.value():
             run_for = self.__eval_expr(cond_ast)  # check for-loop condition
+
+            # Evaluate lazy condition - conditionals
+            if result.is_lazy:
+                result = result.evaluate(self.evaluate_expression)
+
             if run_for.type() != Type.BOOL:
                 super().error(
                     ErrorType.TYPE_ERROR,
@@ -343,3 +398,16 @@ class Interpreter(InterpreterBase):
         return (ExecStatus.RETURN, value_obj)
     
 
+def main():
+    program_source = """
+    func main() {
+        var x;
+        x = 5 + 10;  
+        print(x);    
+    }
+    """
+    interpreter = Interpreter()
+    interpreter.run(program_source)
+
+if __name__ == "__main__":
+    main()

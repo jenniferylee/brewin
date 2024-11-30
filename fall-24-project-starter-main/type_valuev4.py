@@ -40,7 +40,7 @@ class Value:
         # evaluates the lazy value if not alr evaluated
         # evaluator is a function that takes the ast_node and environment and evaluates it
         if not self.is_lazy:
-            return self  # Return self if not lazy
+            return self  # Return self if not lazy or alr eval
         if not self.is_evaluated:
             # Use the evaluator with the captured environment snapshot
             self.cached_value = evaluator(self.ast_node, self.env_snapshot)
