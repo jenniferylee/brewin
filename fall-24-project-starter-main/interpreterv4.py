@@ -41,8 +41,8 @@ class Interpreter(InterpreterBase):
         status, return_val = self.__call_func_aux("main", [])
         
         if status == ExecStatus.EXCEPTION:
-            #super().error(ErrorType.FAULT_ERROR, f"Unhandled exception: {return_val}")
-            self.output(f"Unhandled exception: {return_val}")
+            super().error(ErrorType.FAULT_ERROR, f"Unhandled exception: {return_val}")
+            #self.output(f"Unhandled exception: {return_val}")
 
     def __set_up_function_table(self, ast):
         self.func_name_to_ast = {}
@@ -523,18 +523,17 @@ class Interpreter(InterpreterBase):
 def main():
     program_source = """
 func throw_error() {
-    print("DEBUG: Inside throw_error");
-    raise "function_error";
+    raise "unhandled_error";
 }
 
 func main() {
     try {
-        print("DEBUG: Before throw_error");
+        print("Before throw_error");
         throw_error();
-        print("DEBUG: After throw_error");
+        print("After throw_error");
     }
-    catch "function_error" {
-        print("Caught function error");
+    catch "different_error" {
+        print("Caught different error");
     }
 }
     """
