@@ -4,9 +4,9 @@ import copy
 from enum import Enum
 
 from brewparse import parse_program
-from env_v2 import EnvironmentManager
+from env_v4 import EnvironmentManager
 from intbase import InterpreterBase, ErrorType
-from type_valuev2 import Type, Value, create_value, get_printable
+from type_valuev4 import Type, Value, create_value, get_printable
 
 
 class ExecStatus(Enum):
@@ -146,8 +146,15 @@ class Interpreter(InterpreterBase):
 
     def __assign(self, assign_ast):
         var_name = assign_ast.get("name")
-        value_obj = self.__eval_expr(assign_ast.get("expression"))
-        if not self.env.set(var_name, value_obj):
+        
+        # replace eager evaluation with creation of a "lazy Value"
+        expression_ast = assign_ast.get("expression")
+        # create lazy Value instead of evaluating expr
+        lazy_value = Value(None, None) # defer the type and value
+        lazy_value.set_lazy(expression_ast, self.env.snapshot()) # capture the environment
+
+        # store the lazy value in the environment
+        if not self.env.set(var_name, lazy_value):
             super().error(
                 ErrorType.NAME_ERROR, f"Undefined variable {var_name} in assignment"
             )
@@ -334,3 +341,5 @@ class Interpreter(InterpreterBase):
             return (ExecStatus.RETURN, Interpreter.NIL_VALUE)
         value_obj = copy.copy(self.__eval_expr(expr_ast))
         return (ExecStatus.RETURN, value_obj)
+    
+

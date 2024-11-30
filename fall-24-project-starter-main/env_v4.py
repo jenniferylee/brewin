@@ -1,3 +1,5 @@
+# from carey's v2 solution
+
 # The EnvironmentManager class keeps a mapping between each variable name (aka symbol)
 # in a brewin program and the Value object, which stores a type, and a value.
 class EnvironmentManager:
@@ -18,6 +20,7 @@ class EnvironmentManager:
         for env in reversed(cur_func_env):
             if symbol in env:
                 env[symbol] = value
+                print(f"DEBUG: Stored {symbol} as {value} (Lazy: {value.is_lazy})")  # Debugging
                 return True
 
         return False
@@ -46,3 +49,9 @@ class EnvironmentManager:
     # used when we exit a nested block to discard the environment for that block
     def pop_func(self):
         self.environment.pop()
+
+    # support for lazy eval: snapshot function to capture deep copy of current environment
+    # Citation: code from chatgpt
+    def snapshot(self):
+        return [[env.copy() for env in func_env] for func_env in self.environment]
+    # End of copied code
