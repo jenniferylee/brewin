@@ -12,6 +12,7 @@ from type_valuev4 import Type, Value, create_value, get_printable
 class ExecStatus(Enum):
     CONTINUE = 1
     RETURN = 2
+    EXCEPTION = 3 # new state for exceptions (similar to RETURN)
 
 
 # Main interpreter class
@@ -61,8 +62,10 @@ class Interpreter(InterpreterBase):
         for statement in statements:
             if self.trace_output:
                 print(statement)
-            status, return_val = self.__run_statement(statement)
-            if status == ExecStatus.RETURN:
+            status, return_val = self.__run_statement(statement) # execute statement
+            
+            # also add if status is exception, stop execution
+            if status in  [ExecStatus.RETURN, ExecStatus.EXCEPTION]:
                 self.env.pop_block()
                 return (status, return_val)
 
@@ -84,6 +87,9 @@ class Interpreter(InterpreterBase):
             status, return_val = self.__do_if(statement)
         elif statement.elem_type == Interpreter.FOR_NODE:
             status, return_val = self.__do_for(statement)
+        elif statement.elem_type == InterpreterBase.RAISE_NODE:
+            status, return_val = self.__do_raise(statement)
+
 
         return (status, return_val)
     
@@ -203,6 +209,7 @@ class Interpreter(InterpreterBase):
                 # Restore the original environment
                 self.env = original_env
 
+    # og eval expr function for eager eval in current env context
     def __eval_expr(self, expr_ast):
         if expr_ast.elem_type == InterpreterBase.NIL_NODE:
             return Interpreter.NIL_VALUE
@@ -216,7 +223,8 @@ class Interpreter(InterpreterBase):
             var_name = expr_ast.get("name")
             val = self.env.get(var_name)
             if val is None:
-                super().error(ErrorType.NAME_ERROR, f"Variable {var_name} not found")
+                # super().error(ErrorType.NAME_ERROR, f"Variable {var_name} not found")
+                raise Exception("Variable not found") # raise exception here
             return val
         if expr_ast.elem_type == InterpreterBase.FCALL_NODE:
             return self.__call_func(expr_ast)
@@ -236,6 +244,10 @@ class Interpreter(InterpreterBase):
             left_value_obj = left_value_obj.evaluate(self.evaluate_expression)
         if right_value_obj.is_lazy:
             right_value_obj = right_value_obj.evaluate(self.evaluate_expression)
+
+        # check div by 0
+        if arith_ast.elem_type == "/" and right_value_obj.value() == 0:
+            raise Exception("Division by zero") # raise exception explicitly for divby0
 
         # checking for type compatibility
         if not self.__compatible_types(
@@ -397,14 +409,31 @@ class Interpreter(InterpreterBase):
         value_obj = copy.copy(self.__eval_expr(expr_ast))
         return (ExecStatus.RETURN, value_obj)
     
+    # function for exeucting raise statement
+    def __do_raise(self, raise_ast):
+        error_value = self.__eval_expr(raise_ast.get("expression"))
+        # ensure the evaluated error value is a string
+        if error_value.type() != Type.STRING:
+            super().error(ErrorType.TYPE_ERROR, "Raised value must be string!")
+        
+        # propagate execption --> just like how we did return
+        return (ExecStatus.EXCEPTION, error_value.value())
+    
 
 def main():
     program_source = """
+    func lazy_add(a, b) {
+        print(a + b); 
+    }
+
     func main() {
         var x;
-        x = 5 + 10;  
-        print(x);    
+        x = 5;
+        var y;
+        y = 10;
+        lazy_add(x + 5, y * 2);  
     }
+
     """
     interpreter = Interpreter()
     interpreter.run(program_source)
