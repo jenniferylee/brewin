@@ -41,7 +41,8 @@ class Interpreter(InterpreterBase):
         status, return_val = self.__call_func_aux("main", [])
         
         if status == ExecStatus.EXCEPTION:
-            super().error(ErrorType.FAULT_ERROR, f"Unhandled exception: {return_val}")
+            #super().error(ErrorType.FAULT_ERROR, f"Unhandled exception: {return_val}")
+            self.output(f"Unhandled exception: {return_val}")
 
     def __set_up_function_table(self, ast):
         self.func_name_to_ast = {}
@@ -71,9 +72,19 @@ class Interpreter(InterpreterBase):
             status, return_val = self.__run_statement(statement) # execute statement
             
             # also add if status is exception, stop execution
-            if status in [ExecStatus.RETURN, ExecStatus.EXCEPTION]:
+            '''if status in [ExecStatus.RETURN, ExecStatus.EXCEPTION]:
+                self.env.pop_block()
+                return (status, return_val)'''
+            
+            if status == ExecStatus.EXCEPTION:
+                print(f"DEBUG: Exception '{return_val}' encountered in statement")
+                self.env.pop_block()
+                return (status, return_val)  # Propagate the exception
+
+            if status == ExecStatus.RETURN:
                 self.env.pop_block()
                 return (status, return_val)
+
 
         self.env.pop_block()
         return (ExecStatus.CONTINUE, Interpreter.NIL_VALUE)
@@ -82,7 +93,8 @@ class Interpreter(InterpreterBase):
         status = ExecStatus.CONTINUE
         return_val = None
         if statement.elem_type == InterpreterBase.FCALL_NODE:
-            self.__call_func(statement)
+            print(f"DEBUG: Executing function call '{statement.get('name')}'")
+            status, return_val = self.__call_func(statement)
         elif statement.elem_type == "=":
             self.__assign(statement)
         elif statement.elem_type == InterpreterBase.VAR_DEF_NODE:
@@ -97,6 +109,12 @@ class Interpreter(InterpreterBase):
             status, return_val = self.__do_raise(statement)
         elif statement.elem_type == InterpreterBase.TRY_NODE:
             status, return_val = self.__do_try(statement)
+
+         # Debugging: Log any propagated exceptions or returns
+        if status == ExecStatus.EXCEPTION:
+            print(f"DEBUG: Exception '{return_val}' propagated from statement")
+        elif status == ExecStatus.RETURN:
+            print(f"DEBUG: Return encountered with value '{return_val}'")
 
 
         return (status, return_val)
@@ -133,16 +151,21 @@ class Interpreter(InterpreterBase):
         for arg_name, value in args.items():
           self.env.create(arg_name, value)
 
-        # _, return_val = self.__run_statements(func_ast.get("statements"))
-        status, return_val = self.__run_statements(func_ast.get("statements"))
+        try:
+            status, return_val = self.__run_statements(func_ast.get("statements"))
 
-        # propagte exception if occurred
-        if status == ExecStatus.EXCEPTION:
+            # propagte exception if occurred
+            if status == ExecStatus.EXCEPTION:
+                print(f"DEBUG: Exception '{return_val}' raised in function '{func_name}'")
+                self.env.pop_func()
+                return (ExecStatus.EXCEPTION, return_val)
+
             self.env.pop_func()
-            return (ExecStatus.EXCEPTION, return_val)
-
-        self.env.pop_func()
-        return (ExecStatus.CONTINUE, return_val)
+            return (ExecStatus.CONTINUE, return_val)
+        except Exception as e:
+            print(f"DEBUG: Internal exception in __call_func_aux for '{func_name}': {e}")
+            self.env.pop_func()  # Clean up function scope
+            return (ExecStatus.EXCEPTION, str(e))
 
     def __call_print(self, args):
         output = ""
@@ -155,7 +178,7 @@ class Interpreter(InterpreterBase):
 
             output = output + get_printable(result) # converting to printable form
         super().output(output)
-        return Interpreter.NIL_VALUE
+        return (ExecStatus.CONTINUE, Interpreter.NIL_VALUE)
 
     def __call_input(self, name, args):
         if args is not None and len(args) == 1:
@@ -167,9 +190,9 @@ class Interpreter(InterpreterBase):
             )
         inp = super().get_input()
         if name == "inputi":
-            return Value(Type.INT, int(inp))
+            return (ExecStatus.CONTINUE, Value(Type.INT, int(inp)))
         if name == "inputs":
-            return Value(Type.STRING, inp)
+            return (ExecStatus.CONTINUE, Value(Type.STRING, inp))
 
     def __assign(self, assign_ast):
         var_name = assign_ast.get("name")
@@ -243,7 +266,11 @@ class Interpreter(InterpreterBase):
                 raise Exception("Variable not found") # raise exception here
             return val
         if expr_ast.elem_type == InterpreterBase.FCALL_NODE:
-            return self.__call_func(expr_ast)
+            #return self.__call_func(expr_ast)
+            status, return_val = self.__call_func(expr_ast)
+            if status == ExecStatus.EXCEPTION:
+                raise Exception(f"Unhandled exception: {return_val}")
+            return return_val  # Ensure we return the value here
         if expr_ast.elem_type in Interpreter.BIN_OPS:
             return self.__eval_op(expr_ast)
         if expr_ast.elem_type == Interpreter.NEG_NODE:
@@ -465,10 +492,12 @@ class Interpreter(InterpreterBase):
     def __do_try(self, try_ast):
         # execute try block
         try_statements = try_ast.get("statements")
+        print("DEBUG: Entering try block")
         status, return_val = self.__run_statements(try_statements)
 
         # if no excpetion, return normally
         if status != ExecStatus.EXCEPTION:
+            print(f"hi????")
             return (status, return_val)
         
         # if exception, look for matching catcher
@@ -493,18 +522,21 @@ class Interpreter(InterpreterBase):
 
 def main():
     program_source = """
-    func throw_error() {
-        raise "function_error";
-    }
+func throw_error() {
+    print("DEBUG: Inside throw_error");
+    raise "function_error";
+}
 
-    func main() {
-        try {
-            throw_error();
-        }
-        catch "function_error" {
-            print("Caught function error");
-        }
+func main() {
+    try {
+        print("DEBUG: Before throw_error");
+        throw_error();
+        print("DEBUG: After throw_error");
     }
+    catch "function_error" {
+        print("Caught function error");
+    }
+}
     """
     interpreter = Interpreter()
     interpreter.run(program_source)

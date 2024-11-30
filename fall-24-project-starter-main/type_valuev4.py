@@ -46,6 +46,19 @@ class Value:
             self.cached_value = evaluator(self.ast_node, self.env_snapshot)
             self.is_evaluated = True
         return self.cached_value
+    
+    '''def evaluate(self, evaluator):
+        print(f"DEBUG: Evaluating lazy value: {self.ast_node} in captured environment")
+        if not self.is_lazy:
+            return self
+        if not self.is_evaluated:
+            try:
+                result = evaluator(self.ast_node, self.env_snapshot)
+                self.cached_value = result
+            except Exception as e:
+                self.cached_value = Value(Type.STRING, str(e))  # Wrap exception as a string
+            self.is_evaluated = True
+        return self.cached_value'''
 
 
 
@@ -74,6 +87,7 @@ def get_printable(val):
         if val.value() is True:
             return "true"
         return "false"
-    if val.type() == Type.NIL:
+    return None
+    '''if val.type() == Type.NIL:
         return "nil"
-    raise ValueError("Unsupported value type")  # explicit error handling
+    raise ValueError("Unsupported value type")  # explicit error handling'''
