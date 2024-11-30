@@ -55,3 +55,8 @@ class EnvironmentManager:
     def snapshot(self):
         return [[env.copy() for env in func_env] for func_env in self.environment]
     # End of copied code
+
+    # checks whether we are in global scope
+    def is_global_scope(self):
+        is_global = len(self.environment) == 1
+        return is_global

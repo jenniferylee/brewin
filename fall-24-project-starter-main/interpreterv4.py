@@ -35,7 +35,13 @@ class Interpreter(InterpreterBase):
         ast = parse_program(program)
         self.__set_up_function_table(ast)
         self.env = EnvironmentManager()
-        self.__call_func_aux("main", [])
+        #self.__call_func_aux("main", [])
+
+        # Call main and handle top-level exceptions
+        status, return_val = self.__call_func_aux("main", [])
+        
+        if status == ExecStatus.EXCEPTION:
+            super().error(ErrorType.FAULT_ERROR, f"Unhandled exception: {return_val}")
 
     def __set_up_function_table(self, ast):
         self.func_name_to_ast = {}
@@ -65,7 +71,7 @@ class Interpreter(InterpreterBase):
             status, return_val = self.__run_statement(statement) # execute statement
             
             # also add if status is exception, stop execution
-            if status in  [ExecStatus.RETURN, ExecStatus.EXCEPTION]:
+            if status in [ExecStatus.RETURN, ExecStatus.EXCEPTION]:
                 self.env.pop_block()
                 return (status, return_val)
 
@@ -89,6 +95,8 @@ class Interpreter(InterpreterBase):
             status, return_val = self.__do_for(statement)
         elif statement.elem_type == InterpreterBase.RAISE_NODE:
             status, return_val = self.__do_raise(statement)
+        elif statement.elem_type == InterpreterBase.TRY_NODE:
+            status, return_val = self.__do_try(statement)
 
 
         return (status, return_val)
@@ -124,9 +132,17 @@ class Interpreter(InterpreterBase):
         # and add the formal arguments to the activation record
         for arg_name, value in args.items():
           self.env.create(arg_name, value)
-        _, return_val = self.__run_statements(func_ast.get("statements"))
+
+        # _, return_val = self.__run_statements(func_ast.get("statements"))
+        status, return_val = self.__run_statements(func_ast.get("statements"))
+
+        # propagte exception if occurred
+        if status == ExecStatus.EXCEPTION:
+            self.env.pop_func()
+            return (ExecStatus.EXCEPTION, return_val)
+
         self.env.pop_func()
-        return return_val
+        return (ExecStatus.CONTINUE, return_val)
 
     def __call_print(self, args):
         output = ""
@@ -380,25 +396,41 @@ class Interpreter(InterpreterBase):
         update_ast = for_ast.get("update") 
 
         self.__run_statement(init_ast)  # initialize counter variable
-        run_for = Interpreter.TRUE_VALUE
-        while run_for.value():
-            run_for = self.__eval_expr(cond_ast)  # check for-loop condition
+        # run_for = Interpreter.TRUE_VALUE
+        while True:
+            # eval loop condition
+            try: 
+                run_for = self.__eval_expr(cond_ast)  # check for-loop condition
 
-            # Evaluate lazy condition - conditionals
-            if result.is_lazy:
-                result = result.evaluate(self.evaluate_expression)
+                # Evaluate lazy condition - conditionals
+                if result.is_lazy:
+                    result = result.evaluate(self.evaluate_expression)
 
-            if run_for.type() != Type.BOOL:
-                super().error(
-                    ErrorType.TYPE_ERROR,
-                    "Incompatible type for for condition",
-                )
-            if run_for.value():
-                statements = for_ast.get("statements")
-                status, return_val = self.__run_statements(statements)
-                if status == ExecStatus.RETURN:
-                    return status, return_val
-                self.__run_statement(update_ast)  # update counter variable
+                if run_for.type() != Type.BOOL:
+                    raise Exception("Condition must eval to bool")
+                
+                # exit loop if condition false
+                if not run_for.value():
+                    break
+
+            except Exception as e:
+                # propagate excpetions from condition evaluation
+                return (ExecStatus.EXCEPTION, str(e))
+            
+            # now run the loop body
+            try:
+                status, return_val = self.__run_statements(for_ast.get("statements"))
+
+                #if RETURN or EXCEPTIOn, propagate
+                if status in [ExecStatus.RETURN, ExecStatus.EXCEPTION]:
+                    return (status, return_val)
+                
+            finally:
+                # execute update satement
+                self.__run_statement(update_ast) # update counster variable
+
+
+           
 
         return (ExecStatus.CONTINUE, Interpreter.NIL_VALUE)
 
@@ -411,29 +443,68 @@ class Interpreter(InterpreterBase):
     
     # function for exeucting raise statement
     def __do_raise(self, raise_ast):
-        error_value = self.__eval_expr(raise_ast.get("expression"))
-        # ensure the evaluated error value is a string
+        exception_type_ast = raise_ast.get("exception_type")
+        if exception_type_ast is None:
+            super().error(ErrorType.NAME_ERROR, "Raise statement missing exception type!")
+
+        # eval excpetion type
+        error_value = self.__eval_expr(exception_type_ast)
+
+        # lazy value handling
+        if error_value.is_lazy:
+            error_value = error_value.evaluate(self.evaluate_expression)
+
         if error_value.type() != Type.STRING:
-            super().error(ErrorType.TYPE_ERROR, "Raised value must be string!")
+            super().error(ErrorType.TYPE_ERROR, "Raised value not string!")
         
         # propagate execption --> just like how we did return
         return (ExecStatus.EXCEPTION, error_value.value())
     
+    # function for try statement
+    # try node is a statement node with elem_type 'try' and two keys in dictionary: 'statements' and 'catchers'
+    def __do_try(self, try_ast):
+        # execute try block
+        try_statements = try_ast.get("statements")
+        status, return_val = self.__run_statements(try_statements)
+
+        # if no excpetion, return normally
+        if status != ExecStatus.EXCEPTION:
+            return (status, return_val)
+        
+        # if exception, look for matching catcher
+        exception_type = return_val  # string exception value
+        for catch_node in try_ast.get("catchers"):
+            if catch_node.get("exception_type") == exception_type:
+                # execute statements in the catch block
+                catch_statements = catch_node.get("statements")
+                self.env.push_block()
+                status, return_val = self.__run_statements(catch_statements)
+                self.env.pop_block()
+                return (status, return_val)
+
+        # if no matching catch block found, propagate exception
+        # but if top level, raise FAULT_ERROR (check one function level scope but also second part ensures within function level scope only one block level scope)
+        if len(self.env.environment) == 1 and len(self.env.environment[0]) == 1:
+            super().error(ErrorType.FAULT_ERROR, f"Unhandled exception: {exception_type}")
+
+        # if no matching catcher, propagate exception
+        return (ExecStatus.EXCEPTION, exception_type)
+    
 
 def main():
     program_source = """
-    func lazy_add(a, b) {
-        print(a + b); 
+    func throw_error() {
+        raise "function_error";
     }
 
     func main() {
-        var x;
-        x = 5;
-        var y;
-        y = 10;
-        lazy_add(x + 5, y * 2);  
+        try {
+            throw_error();
+        }
+        catch "function_error" {
+            print("Caught function error");
+        }
     }
-
     """
     interpreter = Interpreter()
     interpreter.run(program_source)
