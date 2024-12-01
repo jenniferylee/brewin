@@ -37,12 +37,20 @@ class Interpreter(InterpreterBase):
         self.env = EnvironmentManager()
         #self.__call_func_aux("main", [])
 
-        # Call main and handle top-level exceptions
-        status, return_val = self.__call_func_aux("main", [])
-        
-        if status == ExecStatus.EXCEPTION:
-            super().error(ErrorType.FAULT_ERROR, f"Unhandled exception: {return_val}")
-            #self.output(f"Unhandled exception: {return_val}")
+        try:
+            # Call main and handle top-level exceptions
+            status, return_val = self.__call_func_aux("main", [])
+            
+            if status == ExecStatus.EXCEPTION:
+                #super().error(ErrorType.FAULT_ERROR, f"Unhandled exception: {return_val}")
+                raise Exception(f"ErrorType.FAULT_ERROR: Unhandled exception: {return_val}")
+
+        except Exception as e:
+            print("hello?")
+            if "ErrorType" in str(e):  # This ensures only `ErrorType` exceptions are caught
+                print(e)
+            else:
+                raise
 
     def __set_up_function_table(self, ast):
         self.func_name_to_ast = {}
@@ -163,9 +171,16 @@ class Interpreter(InterpreterBase):
             self.env.pop_func()
             return (ExecStatus.CONTINUE, return_val)
         except Exception as e:
-            print(f"DEBUG: Internal exception in __call_func_aux for '{func_name}': {e}")
+            '''print(f"DEBUG: Internal exception in __call_func_aux for '{func_name}': {e}")
             self.env.pop_func()  # Clean up function scope
-            return (ExecStatus.EXCEPTION, str(e))
+            return (ExecStatus.EXCEPTION, str(e))'''
+            # Check if the exception is a fatal interpreter error
+            if isinstance(e, Exception) and "ErrorType" in str(e):
+                raise  # Reraise fatal errors to be handled at the top level
+            else:
+                print(f"DEBUG: Internal exception in __call_func_aux for '{func_name}': {e}")
+                self.env.pop_func()
+                return (ExecStatus.EXCEPTION, str(e))
 
     def __call_print(self, args):
         output = ""
@@ -497,7 +512,6 @@ class Interpreter(InterpreterBase):
 
         # if no excpetion, return normally
         if status != ExecStatus.EXCEPTION:
-            print(f"hi????")
             return (status, return_val)
         
         # if exception, look for matching catcher
@@ -522,19 +536,8 @@ class Interpreter(InterpreterBase):
 
 def main():
     program_source = """
-func throw_error() {
-    raise "unhandled_error";
-}
-
 func main() {
-    try {
-        print("Before throw_error");
-        throw_error();
-        print("After throw_error");
-    }
-    catch "different_error" {
-        print("Caught different error");
-    }
+    raise 42;
 }
     """
     interpreter = Interpreter()
