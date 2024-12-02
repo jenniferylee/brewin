@@ -42,12 +42,23 @@ class Interpreter(InterpreterBase):
             status, return_val = self.__call_func_aux("main", [])
             
             if status == ExecStatus.EXCEPTION:
-                #super().error(ErrorType.FAULT_ERROR, f"Unhandled exception: {return_val}")
-                raise Exception(f"ErrorType.FAULT_ERROR: Unhandled exception: {return_val}")
+                print(f"DEBUG: Exception status returned, value = {return_val}, type = {type(return_val)}")
+                # Unwrap Value object if needed
+                if isinstance(return_val, Value) and return_val.type() == Type.STRING:
+                    return_val = return_val.value()
+                if not isinstance(return_val, str):
+                    print(f"DEBUG: Converting return_val to string: {return_val}")
+                    return_val = str(return_val)
+                error_message = f"ErrorType.{return_val.strip()}"
+                print(f"DEBUG: Outputting exception: {error_message}")
+                super().output(error_message)  # Explicitly print the error message
+                raise Exception(error_message)
 
         except Exception as e:
             if "ErrorType" in str(e):  # This ensures only `ErrorType` exceptions are caught
-                print(e)
+                # Extract only the error type for consistency with expected output
+                simplified_error = str(e).split(":")[0].strip()
+                super().output(simplified_error.strip())
             else:
                 raise
 
@@ -155,6 +166,11 @@ class Interpreter(InterpreterBase):
 
             # propagte exception if occurred
             if status == ExecStatus.EXCEPTION:
+                print(f"DEBUG: Exception '{return_val}' propagated from function '{func_name}'")
+                
+                 # Unwrap exception if it's a Value object
+                if isinstance(return_val, Value) and return_val.type() == Type.STRING:
+                    return_val = return_val.value()
                 self.env.pop_func()
                 return (ExecStatus.EXCEPTION, return_val)
 
@@ -166,18 +182,29 @@ class Interpreter(InterpreterBase):
                 raise  # Reraise fatal errors to be handled at the top level
             else:
                 self.env.pop_func()
-                return (ExecStatus.EXCEPTION, str(e))
+                #return (ExecStatus.EXCEPTION, str(e))
+                # Wrap unexpected exceptions in a Value object
+                return (ExecStatus.EXCEPTION, Value(Type.STRING, str(e)))
 
     def __call_print(self, args):
         output = ""
         for arg in args:
-            result = self.__eval_expr(arg)  # result is a Value object
+            try:
+                result = self.__eval_expr(arg)  # Evaluate the argument
+                 # Check if result is a tuple (indicating an exception)
+                if isinstance(result, tuple) and result[0] == ExecStatus.EXCEPTION:
+                    print(f"DEBUG: Exception in print argument: {result[1]}")
+                    return (ExecStatus.EXCEPTION, result[1])
 
-            # Evaluate lazy values
-            if result.is_lazy:
-                result = result.evaluate(self.evaluate_expression)
+                # Evaluate lazy values
+                if result.is_lazy:
+                    result = result.evaluate(self.evaluate_expression)
 
-            output = output + get_printable(result) # converting to printable form
+                output += get_printable(result)
+            except Exception as e:
+                print(f"DEBUG: Exception during print evaluation: {e}")
+                #return (ExecStatus.EXCEPTION, str(e))  # Ensure exception is passed as string
+                return (ExecStatus.EXCEPTION, Value(Type.STRING, str(e)))  # Wrap exception in Value
         super().output(output)
         return (ExecStatus.CONTINUE, Interpreter.NIL_VALUE)
 
@@ -270,7 +297,14 @@ class Interpreter(InterpreterBase):
             #return self.__call_func(expr_ast)
             status, return_val = self.__call_func(expr_ast)
             if status == ExecStatus.EXCEPTION:
-                raise Exception(f"Unhandled exception: {return_val}")
+                print(f"DEBUG: Exception '{return_val}' propagated from function call")
+                #return (status, return_val)  # Pass it up to __do_try
+                # Ensure return_val is a Value object
+                if not isinstance(return_val, Value):
+                    print(f"DEBUG: Wrapping exception in a Value object: {return_val}")
+                    #raise Exception("Function call did not return a Value object")
+                    return_val = Value(Type.STRING, str(return_val)) 
+                return (status, return_val)
             return return_val  # Ensure we return the value here
         if expr_ast.elem_type in Interpreter.BIN_OPS:
             return self.__eval_op(expr_ast)
@@ -280,67 +314,82 @@ class Interpreter(InterpreterBase):
             return self.__eval_unary(expr_ast, Type.BOOL, lambda x: not x)
 
     def __eval_op(self, arith_ast):
-        left_value_obj = self.__eval_expr(arith_ast.get("op1"))
+        try:
+            left_value_obj = self.__eval_expr(arith_ast.get("op1"))
 
-        # short circuiting time!!
-        
-        # eval lazy operands
-        if left_value_obj.is_lazy:
-            left_value_obj = left_value_obj.evaluate(self.evaluate_expression)
-        
-        # short circuit for logical or (||)
-        if arith_ast.elem_type == "||":
-            if left_value_obj.type() != Type.BOOL:
-                super().error(ErrorType.TYPE_ERROR, "left op of || is not a bool")
-            if left_value_obj.value():
-                return Value(Type.BOOL, True) # short circuiting to true since left is true
+            # short circuiting time!!
+            
+            # eval lazy operands
+            if left_value_obj.is_lazy:
+                left_value_obj = left_value_obj.evaluate(self.evaluate_expression)
+            
+            # short circuit for logical or (||)
+            if arith_ast.elem_type == "||":
+                if left_value_obj.type() != Type.BOOL:
+                    super().error(ErrorType.TYPE_ERROR, "left op of || is not a bool")
+                if left_value_obj.value():
+                    return Value(Type.BOOL, True) # short circuiting to true since left is true
+                right_value_obj = self.__eval_expr(arith_ast.get("op2"))
+                if right_value_obj.is_lazy:
+                    right_value_obj = right_value_obj.evaluate(self.evaluate_expression)
+                if right_value_obj.type() != Type.BOOL:
+                    super().error(ErrorType.TYPE_ERROR, "right op of || not a bool")
+                return right_value_obj
+            
+            # short circuit for logical and (&&)
+            if arith_ast.elem_type == "&&":
+                if left_value_obj.type() != Type.BOOL:
+                    super().error(ErrorType.TYPE_ERROR, "left op of && is not a bool")
+                if not left_value_obj.value():
+                    return Value(Type.BOOL, False) # short circuiting to false since left is alr false
+                right_value_obj = self.__eval_expr(arith_ast.get("op2"))
+                if right_value_obj.is_lazy:
+                    right_value_obj = right_value_obj.evaluate(self.evaluate_expression)
+                if right_value_obj.type() != Type.BOOL:
+                    super().error(ErrorType.TYPE_ERROR, "right op of && not a bool")
+                return right_value_obj
+
+
+            # og for other bin ops (besides OR and AND above for short circuiting)
             right_value_obj = self.__eval_expr(arith_ast.get("op2"))
+            # evaluate lazy operands
             if right_value_obj.is_lazy:
                 right_value_obj = right_value_obj.evaluate(self.evaluate_expression)
-            if right_value_obj.type() != Type.BOOL:
-                super().error(ErrorType.TYPE_ERROR, "right op of || not a bool")
-            return right_value_obj
+
+            # check div by 0
+            if arith_ast.elem_type == "/" and right_value_obj.value() == 0:
+                raise Exception("Division by zero") # raise exception explicitly for divby0
+            
+            # reject string comparisons with unsupported operators
+            if left_value_obj.type() == Type.STRING or right_value_obj.type() == Type.STRING:
+                if arith_ast.elem_type not in ["==", "!="]:
+                    print(f"DEBUG: Raising error elem type is {arith_ast.elem_type}")
+                    super().error(
+                        ErrorType.TYPE_ERROR,
+                        f"Incompatible operator {arith_ast.elem_type} for type string",
+                    )
+
+
+            # checking for type compatibility
+            if not self.__compatible_types(
+                arith_ast.elem_type, left_value_obj, right_value_obj
+            ):
+                print(f"DEBUG: Raising TYPE_ERROR for operation {arith_ast.elem_type} with incompatible types")
+                super().error(
+                    ErrorType.TYPE_ERROR,
+                    f"Incompatible types for {arith_ast.elem_type} operation",
+                )
+            if arith_ast.elem_type not in self.op_to_lambda[left_value_obj.type()]:
+                super().error(
+                    ErrorType.TYPE_ERROR,
+                    f"Incompatible operator {arith_ast.elem_type} for type {left_value_obj.type()}",
+                )
+            f = self.op_to_lambda[left_value_obj.type()][arith_ast.elem_type]
+            return f(left_value_obj, right_value_obj)
         
-        # short circuit for logical and (&&)
-        if arith_ast.elem_type == "&&":
-            if left_value_obj.type() != Type.BOOL:
-                super().error(ErrorType.TYPE_ERROR, "left op of && is not a bool")
-            if not left_value_obj.value():
-                return Value(Type.BOOL, False) # short circuiting to false since left is alr false
-            right_value_obj = self.__eval_expr(arith_ast.get("op2"))
-            if right_value_obj.is_lazy:
-                right_value_obj = right_value_obj.evaluate(self.evaluate_expression)
-            if right_value_obj.type() != Type.BOOL:
-                super().error(ErrorType.TYPE_ERROR, "right op of && not a bool")
-            return right_value_obj
-
-
-        # og for other bin ops (besides OR and AND above for short circuiting)
-        right_value_obj = self.__eval_expr(arith_ast.get("op2"))
-        
-        # evaluate lazy operands
-        if right_value_obj.is_lazy:
-            right_value_obj = right_value_obj.evaluate(self.evaluate_expression)
-
-        # check div by 0
-        if arith_ast.elem_type == "/" and right_value_obj.value() == 0:
-            raise Exception("Division by zero") # raise exception explicitly for divby0
-
-        # checking for type compatibility
-        if not self.__compatible_types(
-            arith_ast.elem_type, left_value_obj, right_value_obj
-        ):
-            super().error(
-                ErrorType.TYPE_ERROR,
-                f"Incompatible types for {arith_ast.elem_type} operation",
-            )
-        if arith_ast.elem_type not in self.op_to_lambda[left_value_obj.type()]:
-            super().error(
-                ErrorType.TYPE_ERROR,
-                f"Incompatible operator {arith_ast.elem_type} for type {left_value_obj.type()}",
-            )
-        f = self.op_to_lambda[left_value_obj.type()][arith_ast.elem_type]
-        return f(left_value_obj, right_value_obj)
+        except ValueError as e:
+            print(f"DEBUG: Raising TYPE_ERROR: {e}")
+            raise Exception(f"ErrorType.TYPE_ERROR: {e}")
 
     def __compatible_types(self, oper, obj1, obj2):
         # DOCUMENT: allow comparisons ==/!= of anything against anything
@@ -516,10 +565,13 @@ class Interpreter(InterpreterBase):
             error_value = error_value.evaluate(self.evaluate_expression)
 
         if error_value.type() != Type.STRING:
+            print("DEBUG: TYPE_ERROR in raise statement - value is not a string")
             super().error(ErrorType.TYPE_ERROR, "Raised value not string!")
         
         # propagate execption --> just like how we did return
-        return (ExecStatus.EXCEPTION, error_value.value())
+        #return (ExecStatus.EXCEPTION, error_value.value())
+        # Wrap exception in a Value object
+        return (ExecStatus.EXCEPTION, Value(Type.STRING, error_value.value()))
     
     # function for try statement
     # try node is a statement node with elem_type 'try' and two keys in dictionary: 'statements' and 'catchers'
@@ -533,20 +585,34 @@ class Interpreter(InterpreterBase):
         if status != ExecStatus.EXCEPTION:
             return (status, return_val)
         
+        
+        #exception_type = return_val  # string exception value
+
+        # if exception occurs, handle it
+        print(f"DEBUG: Exception '{return_val}' caught in try block")
+
+        # unwrap the exception if it's a Value object
+        if isinstance(return_val, Value) and return_val.type() == Type.STRING:
+            exception_type = return_val.value()
+        else:
+            exception_type = str(return_val)  # Fallback to raw exception value
+        
         # if exception, look for matching catcher
-        exception_type = return_val  # string exception value
         for catch_node in try_ast.get("catchers"):
             if catch_node.get("exception_type") == exception_type:
+                print(f"DEBUG: Exception '{exception_type}' matched with catch block")
                 # execute statements in the catch block
                 catch_statements = catch_node.get("statements")
                 self.env.push_block()
                 status, return_val = self.__run_statements(catch_statements)
                 self.env.pop_block()
+                
                 return (status, return_val)
 
         # if no matching catch block found, propagate exception
         # but if top level, raise FAULT_ERROR (check one function level scope but also second part ensures within function level scope only one block level scope)
         if len(self.env.environment) == 1 and len(self.env.environment[0]) == 1:
+            print("hi??")
             super().error(ErrorType.FAULT_ERROR, f"Unhandled exception: {exception_type}")
 
         # if no matching catcher, propagate exception
@@ -556,10 +622,10 @@ class Interpreter(InterpreterBase):
 def main():
     program_source = """
 func main() {
-    let x = true;
-    let y = print("This should not print");
-    let result = x || y;
-    print(result);
+ var a;
+ a = "a" <= "b";
+ print("---");
+ print(a);
 }
     """
     interpreter = Interpreter()

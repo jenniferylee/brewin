@@ -20,7 +20,7 @@ class EnvironmentManager:
         for env in reversed(cur_func_env):
             if symbol in env:
                 env[symbol] = value
-                print(f"DEBUG: Stored {symbol} as {value} (Lazy: {value.is_lazy})")  # Debugging
+                # print(f"DEBUG: Stored {symbol} as {value} (Lazy: {value.is_lazy})")  # Debugging
                 return True
 
         return False
