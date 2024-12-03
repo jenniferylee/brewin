@@ -89,13 +89,17 @@ class Interpreter(InterpreterBase):
             status, return_val = self.__run_statement(statement) # execute statement
             
             # also add if status is exception, stop execution
-            '''if status in [ExecStatus.RETURN, ExecStatus.EXCEPTION]:
-                self.env.pop_block()
-                return (status, return_val)'''
+            
             
             if status == ExecStatus.EXCEPTION:
+                # self.env.pop_block()
+                # return (status, return_val)  # Propagate the exception
+
+                # Ensure `return_val` is a Value object
+                if not isinstance(return_val, Value):
+                    return_val = Value(Type.STRING, str(return_val))
                 self.env.pop_block()
-                return (status, return_val)  # Propagate the exception
+                return (status, return_val)
 
             if status == ExecStatus.RETURN:
                 self.env.pop_block()
@@ -292,40 +296,42 @@ class Interpreter(InterpreterBase):
 
     # og eval expr function for eager eval in current env context
     def __eval_expr(self, expr_ast):
-        if expr_ast.elem_type == InterpreterBase.NIL_NODE:
-            return Interpreter.NIL_VALUE
-        if expr_ast.elem_type == InterpreterBase.INT_NODE:
-            return Value(Type.INT, expr_ast.get("val"))
-        if expr_ast.elem_type == InterpreterBase.STRING_NODE:
-            return Value(Type.STRING, expr_ast.get("val"))
-        if expr_ast.elem_type == InterpreterBase.BOOL_NODE:
-            return Value(Type.BOOL, expr_ast.get("val"))
-        if expr_ast.elem_type == InterpreterBase.VAR_NODE:
-            var_name = expr_ast.get("name")
-            val = self.env.get(var_name)
-            if val is None:
-                # super().error(ErrorType.NAME_ERROR, f"Variable {var_name} not found")
-                raise Exception("Variable not found") # raise exception here
-            return val
-        if expr_ast.elem_type == InterpreterBase.FCALL_NODE:
-            #return self.__call_func(expr_ast)
-            status, return_val = self.__call_func(expr_ast)
-            if status == ExecStatus.EXCEPTION:
-                print(f"DEBUG: Exception '{return_val}' propagated from function call")
-                # Ensure return_val is a Value object
-                #if not isinstance(return_val, Value):
-                    #print(f"DEBUG: Wrapping exception in a Value object: {return_val}")
-                    #raise Exception("Function call did not return a Value object")
-                    #return_val = Value(Type.STRING, str(return_val)) 
-                #return (status, return_val)
-                return (ExecStatus.EXCEPTION, return_val)
-            return return_val  # Ensure we return the value here
-        if expr_ast.elem_type in Interpreter.BIN_OPS:
-            return self.__eval_op(expr_ast)
-        if expr_ast.elem_type == Interpreter.NEG_NODE:
-            return self.__eval_unary(expr_ast, Type.INT, lambda x: -1 * x)
-        if expr_ast.elem_type == Interpreter.NOT_NODE:
-            return self.__eval_unary(expr_ast, Type.BOOL, lambda x: not x)
+        try:
+            if expr_ast.elem_type == InterpreterBase.NIL_NODE:
+                return Interpreter.NIL_VALUE
+            if expr_ast.elem_type == InterpreterBase.INT_NODE:
+                return Value(Type.INT, expr_ast.get("val"))
+            if expr_ast.elem_type == InterpreterBase.STRING_NODE:
+                print("bello")
+                return Value(Type.STRING, expr_ast.get("val"))
+            if expr_ast.elem_type == InterpreterBase.BOOL_NODE:
+                return Value(Type.BOOL, expr_ast.get("val"))
+            if expr_ast.elem_type == InterpreterBase.VAR_NODE:
+                var_name = expr_ast.get("name")
+                val = self.env.get(var_name)
+                if val is None:
+                    # super().error(ErrorType.NAME_ERROR, f"Variable {var_name} not found")
+                    raise Exception("Variable not found") # raise exception here
+                return val
+            if expr_ast.elem_type == InterpreterBase.FCALL_NODE:
+                #return self.__call_func(expr_ast)
+                status, return_val = self.__call_func(expr_ast)
+                if status == ExecStatus.EXCEPTION:
+                    print(f"DEBUG: Exception '{return_val}' propagated from function call")
+                    # Ensure proper exception propagation
+                    if not isinstance(return_val, Value):
+                        return_val = Value(Type.STRING, str(return_val))
+                    return (ExecStatus.EXCEPTION, return_val)
+                return return_val  # Ensure we return the value here
+            if expr_ast.elem_type in Interpreter.BIN_OPS:
+                return self.__eval_op(expr_ast)
+            if expr_ast.elem_type == Interpreter.NEG_NODE:
+                return self.__eval_unary(expr_ast, Type.INT, lambda x: -1 * x)
+            if expr_ast.elem_type == Interpreter.NOT_NODE:
+                return self.__eval_unary(expr_ast, Type.BOOL, lambda x: not x)
+        except Exception as e:
+            print(f"DEBUG: Exception during expression evaluation: {e}")
+            raise
 
     def __eval_op(self, arith_ast):
         try:
@@ -505,8 +511,13 @@ class Interpreter(InterpreterBase):
         cond_ast = if_ast.get("condition")
         result = self.__eval_expr(cond_ast)
 
-        # Evaluate lazy condition - conditionals
-        if result.is_lazy:
+        # ccheck for exception propagation
+        if isinstance(result, tuple) and result[0] == ExecStatus.EXCEPTION:
+            print(f"DEBUG: Exception in if condition: {result[1]}")
+            return result  # Propagate the exception
+
+        # evaluate lazy condition - conditionals
+        if isinstance(result, Value) and result.is_lazy:
             result = result.evaluate(self.evaluate_expression)
 
         if result.type() != Type.BOOL:
@@ -578,14 +589,16 @@ class Interpreter(InterpreterBase):
     # function for exeucting raise statement
     def __do_raise(self, raise_ast):
         exception_type_ast = raise_ast.get("exception_type")
+        print(f"debug exception type is {exception_type_ast}")
         if exception_type_ast is None:
             super().error(ErrorType.NAME_ERROR, "Raise statement missing exception type!")
 
         # eval excpetion type
         error_value = self.__eval_expr(exception_type_ast)
+        print(f"errof value {error_value}")
 
         # lazy value handling
-        if error_value.is_lazy:
+        if isinstance(error_value, Value) and error_value.is_lazy:
             error_value = error_value.evaluate(self.evaluate_expression)
 
         if error_value.type() != Type.STRING:
@@ -647,17 +660,22 @@ class Interpreter(InterpreterBase):
 
 def main():
     program_source = """
-func bar(x) {
- print("bar: ", x);
- return x;
+func foo() {
+  raise "foo_cond_error";
 }
 
 func main() {
- var a;
- a = -bar(1);
- print("---");
- print(a);
+  try {
+     if (foo()) {
+       print("This will not execute");
+     }
+  }
+  catch "foo_cond_error" {
+    print("Caught foo_cond_error");
+  }
 }
+
+
     """
     interpreter = Interpreter()
     interpreter.run(program_source)
