@@ -550,43 +550,41 @@ class Interpreter(InterpreterBase):
         update_ast = for_ast.get("update") 
 
         self.__run_statement(init_ast)  # initialize counter variable
-        # run_for = Interpreter.TRUE_VALUE
+
+        # store update as a lazy action
+        update_var = update_ast.get("name")
+        update_expr = update_ast.get("expression")
+
         while True:
-            # eval loop condition
-            try: 
-                run_for = self.__eval_expr(cond_ast)  # check for-loop condition
+            # evaluate loop condition
+            print("DEBUG: Evaluating loop condition")
+            run_for = self.__eval_expr(cond_ast)
 
-                # Evaluate lazy condition - conditionals
-                if result.is_lazy:
-                    result = result.evaluate(self.evaluate_expression)
+            # eval lazy condition
+            if isinstance(run_for, Value) and run_for.is_lazy:
+                run_for = run_for.evaluate(self.evaluate_expression)
 
-                if run_for.type() != Type.BOOL:
-                    raise Exception("Condition must eval to bool")
-                
-                # exit loop if condition false
-                if not run_for.value():
-                    break
+            if run_for.type() != Type.BOOL:
+                super().error(ErrorType.TYPE_ERROR, "Condition must evaluate to bool")
 
-            except Exception as e:
-                # propagate excpetions from condition evaluation
-                return (ExecStatus.EXCEPTION, str(e))
-            
-            # now run the loop body
-            try:
-                status, return_val = self.__run_statements(for_ast.get("statements"))
+            # if condition is false, have to breka out of the loop
+            if not run_for.value():
+                break
 
-                #if RETURN or EXCEPTIOn, propagate
-                if status in [ExecStatus.RETURN, ExecStatus.EXCEPTION]:
-                    return (status, return_val)
-                
-            finally:
-                # execute update satement
-                self.__run_statement(update_ast) # update counster variable
+            # Step 4: Execute loop body
+            status, return_val = self.__run_statements(for_ast.get("statements"))
+            if status in [ExecStatus.RETURN, ExecStatus.EXCEPTION]:
+                return (status, return_val)
 
+            # defer evaluation of the update!! 
+            # create a lazy Value for the update expression
+            lazy_update = Value(None, None)
+            lazy_update.set_lazy(update_expr, self.env.snapshot())
+            self.env.set(update_var, lazy_update)  # store the lazy Value
 
-           
-
+        print("DEBUG: Exiting loop after condition is false")
         return (ExecStatus.CONTINUE, Interpreter.NIL_VALUE)
+
 
     def __do_return(self, return_ast):
         expr_ast = return_ast.get("expression")
@@ -667,18 +665,22 @@ class Interpreter(InterpreterBase):
 
 def main():
     program_source = """
-func foo() {
-  print("foo");
-  return 4;
+func zero() {
+  print("zero");
+  return 0;
+}
+
+func inc(x) {
+ print("inc:", x);
+ return x + 1;
 }
 
 func main() {
-  foo();
-  print("---");
-  var x;
-  x = foo();
-  print("---");
-  print(x); 
+ var a;
+ for (a = 0; zero() + a < 3; a = inc(a)) {
+   print("x");
+ }
+ print("d");
 }
     """
     interpreter = Interpreter()
