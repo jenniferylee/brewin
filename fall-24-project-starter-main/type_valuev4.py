@@ -39,12 +39,28 @@ class Value:
     def evaluate(self, evaluator):
         # evaluates the lazy value if not alr evaluated
         # evaluator is a function that takes the ast_node and environment and evaluates it
-        if not self.is_lazy:
+        '''if not self.is_lazy:
             return self  # Return self if not lazy or alr eval
         if not self.is_evaluated:
             # Use the evaluator with the captured environment snapshot
             self.cached_value = evaluator(self.ast_node, self.env_snapshot)
             self.is_evaluated = True
+        return self.cached_value'''
+        # evaluate only if lazy and not already evaluated
+        if self.is_lazy and not self.is_evaluated:
+            print(f"DEBUG: Evaluating lazy value: {self.ast_node} in captured environment")
+            try:
+                result = evaluator(self.ast_node, self.env_snapshot)
+
+                # ensure the evaluator always returns a Value
+                if not isinstance(result, Value):
+                    raise Exception(f"Evaluation returned unexpected type: {type(result)}")
+                
+                self.cached_value = result
+                self.is_evaluated = True
+            except Exception as e:
+                self.cached_value = Value(Type.STRING, str(e))  # cache exception as a Value
+                self.is_evaluated = True
         return self.cached_value
     
     '''def evaluate(self, evaluator):

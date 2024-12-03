@@ -53,7 +53,9 @@ class EnvironmentManager:
     # support for lazy eval: snapshot function to capture deep copy of current environment
     # Citation: code from chatgpt
     def snapshot(self):
-        return [[env.copy() for env in func_env] for func_env in self.environment]
+        #return [[env.copy() for env in func_env] for func_env in self.environment]
+        from copy import deepcopy
+        return deepcopy(self.environment)
     # End of copied code
 
     # checks whether we are in global scope
