@@ -159,32 +159,7 @@ class Interpreter(InterpreterBase):
         # and add the formal arguments to the activation record
         for arg_name, value in args.items():
           self.env.create(arg_name, value)
-        '''
-        try:
-            status, return_val = self.__run_statements(func_ast.get("statements"))
-
-            # propagte exception if occurred
-            if status == ExecStatus.EXCEPTION:
-                print(f"DEBUG: Exception '{return_val}' propagated from function '{func_name}'")
-                
-                 # unwrap exception if it's a Value object
-                if isinstance(return_val, Value) and return_val.type() == Type.STRING:
-                    return_val = return_val.value()
-                self.env.pop_func()
-                return (ExecStatus.EXCEPTION, return_val)
-
-            self.env.pop_func()
-            return (ExecStatus.CONTINUE, return_val)
-        except Exception as e:
-            # check if the exception is a fatal interpreter error
-            if isinstance(e, Exception) and "ErrorType" in str(e):
-                raise  # Reraise fatal errors to be handled at the top level
-            else:
-                self.env.pop_func()
-                #return (ExecStatus.EXCEPTION, str(e))
-                # Wrap unexpected exceptions in a Value object
-                return (ExecStatus.EXCEPTION, Value(Type.STRING, str(e)))
-                '''
+        
         try:
             status, return_val = self.__run_statements(func_ast.get("statements"))
 
@@ -307,6 +282,9 @@ class Interpreter(InterpreterBase):
                 if not isinstance(result, Value):
                     raise Exception(f"Function call did not return a Value object: {type(result)}")
                 return result
+            if ast_node.elem_type == Interpreter.NEG_NODE:
+                #hanlde lazy negation
+                return self.__eval_unary(ast_node, Type.INT, lambda x: -1 * x)
         finally:
             if original_env is not None:
                 # restore the original environment
@@ -443,6 +421,10 @@ class Interpreter(InterpreterBase):
 
     def __eval_unary(self, arith_ast, t, f):
         value_obj = self.__eval_expr(arith_ast.get("op1"))
+        # evaluate lazy operand if needed
+        if isinstance(value_obj, Value) and value_obj.is_lazy:
+            value_obj = value_obj.evaluate(self.evaluate_expression)
+        
         if value_obj.type() != t:
             super().error(
                 ErrorType.TYPE_ERROR,
@@ -665,22 +647,16 @@ class Interpreter(InterpreterBase):
 
 def main():
     program_source = """
-func zero() {
-  print("zero");
-  return 0;
-}
-
-func inc(x) {
- print("inc:", x);
- return x + 1;
+func bar(x) {
+ print("bar: ", x);
+ return x;
 }
 
 func main() {
  var a;
- for (a = 0; zero() + a < 3; a = inc(a)) {
-   print("x");
- }
- print("d");
+ a = -bar(1);
+ print("---");
+ print(a);
 }
     """
     interpreter = Interpreter()
