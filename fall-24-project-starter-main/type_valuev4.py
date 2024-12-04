@@ -36,45 +36,63 @@ class Value:
         self.ast_node = ast_node
         self.env_snapshot = env_snapshot
     
-    def evaluate(self, evaluator):
+    '''def evaluate(self, evaluator):
         # evaluates the lazy value if not alr evaluated
         # evaluator is a function that takes the ast_node and environment and evaluates it
-        '''if not self.is_lazy:
-            return self  # Return self if not lazy or alr eval
-        if not self.is_evaluated:
-            # Use the evaluator with the captured environment snapshot
-            self.cached_value = evaluator(self.ast_node, self.env_snapshot)
-            self.is_evaluated = True
-        return self.cached_value'''
-        # evaluate only if lazy and not already evaluated
-        if self.is_lazy and not self.is_evaluated:
+
+        # Return the cached value if already evaluated
+        # Return the cached value if already evaluated
+        if self.is_evaluated:
+            print(f"DEBUG: Using cached value: {self.cached_value}")
+            return self.cached_value
+
+        if self.is_lazy:
             print(f"DEBUG: Evaluating lazy value: {self.ast_node} in captured environment")
             try:
+                # Evaluate using the evaluator
                 result = evaluator(self.ast_node, self.env_snapshot)
-
-                # ensure the evaluator always returns a Value
                 if not isinstance(result, Value):
-                    raise Exception(f"Evaluation returned unexpected type: {type(result)}")
-                
-                self.cached_value = result
+                    raise Exception(f"Unexpected evaluation result type: {type(result)}")
+
+                self.cached_value = result  # cache the evaluated result
                 self.is_evaluated = True
+                self.t = result.type()  # Update type to reflect the evaluated value
+                self.v = result.value()  # Update value to reflect the evaluated result
+
+                # Replace the lazy variable in the captured environment
+                var_name = self.ast_node.get("name")
+                if var_name:
+                    for scope in reversed(self.env_snapshot[-1]):  # Look for the variable in the captured environment
+                        if var_name in scope:
+                            scope[var_name] = result
+                            break
             except Exception as e:
-                self.cached_value = Value(Type.STRING, str(e))  # cache exception as a Value
-                self.is_evaluated = True
-        return self.cached_value
-    
-    '''def evaluate(self, evaluator):
-        print(f"DEBUG: Evaluating lazy value: {self.ast_node} in captured environment")
-        if not self.is_lazy:
-            return self
-        if not self.is_evaluated:
+                # cache exception as a string-wrapped Value
+                self.cached_value = Value(Type.STRING, str(e))
+                self.is_evaluated = True  # mark as evaluated
+
+        return self.cached_value'''
+    def evaluate(self, evaluator):
+        if self.is_evaluated:
+            return self.cached_value
+
+        if self.is_lazy:
             try:
                 result = evaluator(self.ast_node, self.env_snapshot)
+                if not isinstance(result, Value):
+                    raise Exception("Evaluation did not return a Value object.")
                 self.cached_value = result
+                self.is_evaluated = True
+
+                # Update the type and value directly for caching
+                self.t = result.type()
+                self.v = result.value()
             except Exception as e:
-                self.cached_value = Value(Type.STRING, str(e))  # Wrap exception as a string
-            self.is_evaluated = True
-        return self.cached_value'''
+                self.cached_value = Value(Type.STRING, str(e))
+                self.is_evaluated = True
+                raise
+
+        return self.cached_value
 
 
 

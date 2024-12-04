@@ -1,5 +1,4 @@
 # from carey's v2
-
 import copy
 from enum import Enum
 
@@ -37,13 +36,13 @@ class Interpreter(InterpreterBase):
         self.env = EnvironmentManager()
 
         try:
-            # Call main and handle top-level exceptions
+            # call main and handle top-level exceptions
             status, return_val = self.__call_func_aux("main", [])
             
             if status == ExecStatus.EXCEPTION:
                 print(f"DEBUG: Exception status returned, value = {return_val}, type = {type(return_val)}")
-                # Unwrap Value object if needed
-                if isinstance(return_val, Value) and return_val.type() == Type.STRING:
+                # unwrap Value object if needed
+                '''if isinstance(return_val, Value) and return_val.type() == Type.STRING:
                     return_val = return_val.value()
                 if not isinstance(return_val, str):
                     print(f"DEBUG: Converting return_val to string: {return_val}")
@@ -51,11 +50,20 @@ class Interpreter(InterpreterBase):
                 error_message = f"ErrorType.{return_val.strip()}"
                 print(f"DEBUG: Outputting exception: {error_message}")
                 super().output(error_message)  # Explicitly print the error message
-                raise Exception(error_message)
+                raise Exception(error_message)'''
+                error_message = return_val.value() if isinstance(return_val, Value) else str(return_val)
+
+                # CGOT to check for top-level unhandled exception
+                if len(self.env.environment) == 1 and len(self.env.environment[0]) == 1:
+                    # raise FAULT_ERROR for unhandled exception at top-level scope
+                    super().error(ErrorType.FAULT_ERROR, f"Unhandled exception: {error_message.strip()}")
+                else:
+                    print(f"DEBUG: Outputting exception: {error_message.strip()}")
+                    super().output(error_message.strip())
 
         except Exception as e:
-            if "ErrorType" in str(e):  # This ensures only `ErrorType` exceptions are caught
-                # Extract only the error type for consistency with expected output
+            if "ErrorType" in str(e):  # SOOOo this ensures only `ErrorType` exceptions are caught
+                # extract only the error type for consistency with expected output
                 simplified_error = str(e).split(":")[0].strip()
                 super().output(simplified_error.strip())
             else:
@@ -95,7 +103,7 @@ class Interpreter(InterpreterBase):
                 # self.env.pop_block()
                 # return (status, return_val)  # Propagate the exception
 
-                # Ensure `return_val` is a Value object
+                # ensure `return_val` is a Value object
                 if not isinstance(return_val, Value):
                     return_val = Value(Type.STRING, str(return_val))
                 self.env.pop_block()
@@ -137,7 +145,7 @@ class Interpreter(InterpreterBase):
         actual_args = call_node.get("args")
         return self.__call_func_aux(func_name, actual_args)
 
-    def __call_func_aux(self, func_name, actual_args):
+    '''def __call_func_aux(self, func_name, actual_args):
         if func_name == "print":
             return self.__call_print(actual_args)
         if func_name == "inputi" or func_name == "inputs":
@@ -145,6 +153,7 @@ class Interpreter(InterpreterBase):
 
         func_ast = self.__get_func_by_name(func_name, len(actual_args))
         formal_args = func_ast.get("args")
+
         if len(actual_args) != len(formal_args):
             super().error(
                 ErrorType.NAME_ERROR,
@@ -155,6 +164,10 @@ class Interpreter(InterpreterBase):
         args = {}
         for formal_ast, actual_ast in zip(formal_args, actual_args):
             result = copy.copy(self.__eval_expr(actual_ast))
+            # Propagate exception if argument evaluation raises one
+            if isinstance(result, tuple) and result[0] == ExecStatus.EXCEPTION:
+                return result
+            
             arg_name = formal_ast.get("name")
             args[arg_name] = result
 
@@ -185,11 +198,57 @@ class Interpreter(InterpreterBase):
             self.env.pop_func()
             if "ErrorType" in str(e):
                 raise  # this is fatal error
-            return (ExecStatus.EXCEPTION, Value(Type.STRING, str(e)))  # wrap unexpected exceptions
+            return (ExecStatus.EXCEPTION, Value(Type.STRING, str(e)))  # wrap unexpected exceptions'''
+    def __call_func_aux(self, func_name, actual_args):
+        if func_name == "print":
+            return self.__call_print(actual_args)
+        if func_name == "inputi" or func_name == "inputs":
+            return self.__call_input(func_name, actual_args)
+
+        func_ast = self.__get_func_by_name(func_name, len(actual_args))
+        formal_args = func_ast.get("args")
+
+        if len(actual_args) != len(formal_args):
+            super().error(
+                ErrorType.NAME_ERROR,
+                f"Function {func_ast.get('name')} with {len(actual_args)} args not found",
+            )
+
+        # evaluate arguments and propagate exceptions
+        args = {}
+        for formal_ast, actual_ast in zip(formal_args, actual_args):
+            result = self.__eval_expr(actual_ast)
+            if isinstance(result, tuple) and result[0] == ExecStatus.EXCEPTION:
+                return result  # propagate exception immediately
+            args[formal_ast.get("name")] = result
+
+        # create new function scope
+        self.env.push_func()
+        for arg_name, value in args.items():
+            self.env.create(arg_name, value)
+
+        try:
+            # run function body
+            status, return_val = self.__run_statements(func_ast.get("statements"))
+            
+            if status == ExecStatus.EXCEPTION:
+                print(f"DEBUG: Exception '{return_val}' propagated from function '{func_name}'")
+                self.env.pop_func()
+                return (status, return_val)
+
+            self.env.pop_func()
+            return (ExecStatus.CONTINUE, return_val or Interpreter.NIL_VALUE)
+
+        except Exception as e:
+            self.env.pop_func()
+            if "ErrorType" in str(e):
+                raise  # Reraise critical errors
+            return (ExecStatus.EXCEPTION, Value(Type.STRING, str(e)))
+
 
     def __call_print(self, args):
         output = ""
-        for arg in args:
+        '''for arg in args:
             try:
                 result = self.__eval_expr(arg)  # evaluate the argument
                  # check if result is a tuple (indicating an exception)
@@ -213,9 +272,27 @@ class Interpreter(InterpreterBase):
                 #return (ExecStatus.EXCEPTION, str(e))  # Ensure exception is passed as string
                 return (ExecStatus.EXCEPTION, Value(Type.STRING, str(e)))  # Wrap exception in Value
         super().output(output)
+        return (ExecStatus.CONTINUE, Interpreter.NIL_VALUE)'''
+        for arg in args:
+            try:
+                result = self.__eval_expr(arg)
+                 # check if the result is an exception and propagate it
+                if isinstance(result, tuple) and result[0] == ExecStatus.EXCEPTION:
+                    return result  # Propagate the exception
+                # lazy value
+                if isinstance(result, Value) and result.is_lazy:
+                    result = result.evaluate(self.evaluate_expression)
+                # result ensure is value obj
+                if not isinstance(result, Value):
+                    raise Exception(f"Expected Value, got {type(result)}")
+                output += get_printable(result)
+            except Exception as e:
+                print(f"DEBUG: Exception during print evaluation: {e}")
+                return (ExecStatus.EXCEPTION, Value(Type.STRING, str(e)))
+        super().output(output)
         return (ExecStatus.CONTINUE, Interpreter.NIL_VALUE)
 
-    def __call_input(self, name, args):
+    '''def __call_input(self, name, args):
         if args is not None and len(args) == 1:
             result = self.__eval_expr(args[0])
             super().output(get_printable(result))
@@ -227,7 +304,33 @@ class Interpreter(InterpreterBase):
         if name == "inputi":
             return (ExecStatus.CONTINUE, Value(Type.INT, int(inp)))
         if name == "inputs":
-            return (ExecStatus.CONTINUE, Value(Type.STRING, inp))
+            return (ExecStatus.CONTINUE, Value(Type.STRING, inp))'''
+    def __call_input(self, name, args):
+        # handle input functions with exception propagation
+        try:
+            if args is not None and len(args) == 1:
+                # evaluate the argument and immediately propagate exceptions
+                result = self.__eval_expr(args[0])
+                if isinstance(result, tuple) and result[0] == ExecStatus.EXCEPTION:
+                    return result  # propagate the exception
+                super().output(get_printable(result))
+            elif args is not None and len(args) > 1:
+                super().error(
+                    ErrorType.NAME_ERROR, "No inputi() function that takes > 1 parameter"
+                )
+            inp = super().get_input()
+            if name == "inputi":
+                return (ExecStatus.CONTINUE, Value(Type.INT, int(inp)))  # orocess input as integer
+            if name == "inputs":
+                return (ExecStatus.CONTINUE, Value(Type.STRING, inp))  # process input as string
+        except ValueError as e:
+            # raise a specific exception for invalid integer conversion
+            return (ExecStatus.EXCEPTION, Value(Type.STRING, "invalid_input"))
+        except Exception as e:
+            # propagate any other unexpected exceptions
+            return (ExecStatus.EXCEPTION, Value(Type.STRING, str(e)))
+
+
 
     def __assign(self, assign_ast):
         var_name = assign_ast.get("name")
@@ -237,13 +340,14 @@ class Interpreter(InterpreterBase):
         # create lazy Value instead of evaluating expr
         lazy_value = Value(None, None) # defer the type and value
         lazy_value.set_lazy(expression_ast, self.env.snapshot()) # capture the environment
-
-        # store the lazy value in the environment
+        
+         # store the lazy value in the environment
         if not self.env.set(var_name, lazy_value):
             super().error(
                 ErrorType.NAME_ERROR, f"Undefined variable {var_name} in assignment"
             )
-    
+        
+
     def __var_def(self, var_ast):
         var_name = var_ast.get("name")
         if not self.env.create(var_name, Interpreter.NIL_VALUE):
@@ -262,6 +366,8 @@ class Interpreter(InterpreterBase):
 
         try:
             # Evaluate based on the type of AST node
+            if ast_node.elem_type in self.BIN_OPS:
+                return self.__eval_op(ast_node)
             if ast_node.elem_type == InterpreterBase.INT_NODE:
                 return Value(Type.INT, ast_node.get("val"))
             if ast_node.elem_type == InterpreterBase.STRING_NODE:
@@ -302,16 +408,26 @@ class Interpreter(InterpreterBase):
             if expr_ast.elem_type == InterpreterBase.INT_NODE:
                 return Value(Type.INT, expr_ast.get("val"))
             if expr_ast.elem_type == InterpreterBase.STRING_NODE:
-                print("bello")
+                #print("bello")
                 return Value(Type.STRING, expr_ast.get("val"))
             if expr_ast.elem_type == InterpreterBase.BOOL_NODE:
                 return Value(Type.BOOL, expr_ast.get("val"))
             if expr_ast.elem_type == InterpreterBase.VAR_NODE:
                 var_name = expr_ast.get("name")
+                #val = self.env.get(var_name, evaluator=self.evaluate_expression)  # Pass evaluator
                 val = self.env.get(var_name)
                 if val is None:
-                    # super().error(ErrorType.NAME_ERROR, f"Variable {var_name} not found")
-                    raise Exception("Variable not found") # raise exception here
+                    #raise Exception("Variable not found")  # raise exception here
+                    # Initialize variable with default value
+                    print(f"DEBUG: Variable '{var_name}' not found, initializing to default value.")
+                    default_value = Value(Type.NIL, None)  # Change to a valid default if required
+                    self.env.create(var_name, default_value)
+                    val = default_value
+                # Evaluate lazy value if needed
+                if isinstance(val, Value) and val.is_lazy:
+                    val = val.evaluate(self.evaluate_expression)
+                    # update the environment with the evaluated value!!
+                    self.env.set(var_name, val)
                 return val
             if expr_ast.elem_type == InterpreterBase.FCALL_NODE:
                 #return self.__call_func(expr_ast)
@@ -333,7 +449,7 @@ class Interpreter(InterpreterBase):
             print(f"DEBUG: Exception during expression evaluation: {e}")
             raise
 
-    def __eval_op(self, arith_ast):
+    '''def __eval_op(self, arith_ast):
         try:
             left_value_obj = self.__eval_expr(arith_ast.get("op1"))
 
@@ -415,9 +531,50 @@ class Interpreter(InterpreterBase):
             f = self.op_to_lambda[left_value_obj.type()][arith_ast.elem_type]
             return f(left_value_obj, right_value_obj)
         
-        except ValueError as e:
-            print(f"DEBUG: Raising TYPE_ERROR: {e}")
-            raise Exception(f"ErrorType.TYPE_ERROR: {e}")
+        except Exception as e:
+            print(f"DEBUG: Exception during bin op eval: {e}")
+            raise '''
+    def __eval_op(self, arith_ast):
+        try:
+            left_value_obj = self.__eval_expr(arith_ast.get("op1"))
+            # Evaluate left operand lazily if necessary
+            if isinstance(left_value_obj, Value) and left_value_obj.is_lazy:
+                left_value_obj = left_value_obj.evaluate(self.evaluate_expression)
+
+            # Handle logical short-circuiting
+            if arith_ast.elem_type == "||" and left_value_obj.type() == Type.BOOL:
+                if left_value_obj.value():
+                    return Value(Type.BOOL, True)
+                right_value_obj = self.__eval_expr(arith_ast.get("op2"))
+                return right_value_obj.evaluate(self.evaluate_expression) if right_value_obj.is_lazy else right_value_obj
+
+            if arith_ast.elem_type == "&&" and left_value_obj.type() == Type.BOOL:
+                if not left_value_obj.value():
+                    return Value(Type.BOOL, False)
+                right_value_obj = self.__eval_expr(arith_ast.get("op2"))
+                return right_value_obj.evaluate(self.evaluate_expression) if right_value_obj.is_lazy else right_value_obj
+
+            # Evaluate right operand lazily if necessary
+            right_value_obj = self.__eval_expr(arith_ast.get("op2"))
+            if isinstance(right_value_obj, Value) and right_value_obj.is_lazy:
+                right_value_obj = right_value_obj.evaluate(self.evaluate_expression)
+
+            # Check for division by zero
+            if arith_ast.elem_type == "/" and right_value_obj.value() == 0:
+                raise Exception("div0")
+
+            # Perform the operation
+            if arith_ast.elem_type in self.op_to_lambda[left_value_obj.type()]:
+                f = self.op_to_lambda[left_value_obj.type()][arith_ast.elem_type]
+                return f(left_value_obj, right_value_obj)
+
+            super().error(ErrorType.TYPE_ERROR)
+
+        except Exception as e:
+            if str(e) == "div0":
+                return (ExecStatus.EXCEPTION, Value(Type.STRING, "div0"))
+            raise
+
 
     def __compatible_types(self, oper, obj1, obj2):
         # DOCUMENT: allow comparisons ==/!= of anything against anything
@@ -537,7 +694,7 @@ class Interpreter(InterpreterBase):
 
         return (ExecStatus.CONTINUE, Interpreter.NIL_VALUE)
 
-    def __do_for(self, for_ast):
+    '''def __do_for(self, for_ast):
         init_ast = for_ast.get("init") 
         cond_ast = for_ast.get("condition")
         update_ast = for_ast.get("update") 
@@ -576,7 +733,49 @@ class Interpreter(InterpreterBase):
             self.env.set(update_var, lazy_update)  # store the lazy Value
 
         print("DEBUG: Exiting loop after condition is false")
+        return (ExecStatus.CONTINUE, Interpreter.NIL_VALUE)'''
+    def __do_for(self, for_ast):
+        init_ast = for_ast.get("init")
+        cond_ast = for_ast.get("condition")
+        update_ast = for_ast.get("update")
+
+        # Initialize the loop variable
+        self.__run_statement(init_ast)
+
+        while True:
+            # Evaluate loop condition
+            print("DEBUG: Evaluating loop condition")
+            run_for = self.__eval_expr(cond_ast)
+
+            # Handle exceptions in the condition
+            if isinstance(run_for, tuple) and run_for[0] == ExecStatus.EXCEPTION:
+                print(f"DEBUG: Exception '{run_for[1]}' caught in loop condition")
+                return run_for  # Propagate the exception
+
+            # Evaluate lazy condition if necessary
+            if isinstance(run_for, Value) and run_for.is_lazy:
+                run_for = run_for.evaluate(self.evaluate_expression)
+
+            if run_for.type() != Type.BOOL:
+                super().error(ErrorType.TYPE_ERROR, "Condition must evaluate to bool")
+
+            if not run_for.value():  # Condition is false, exit the loop
+                break
+
+            # Execute loop body
+            status, return_val = self.__run_statements(for_ast.get("statements"))
+            if status in [ExecStatus.RETURN, ExecStatus.EXCEPTION]:
+                return (status, return_val)
+
+            # Update loop variable
+            status, return_val = self.__run_statement(update_ast)
+            if status == ExecStatus.EXCEPTION:
+                print(f"DEBUG: Exception '{return_val}' caught in update")
+                return (status, return_val)
+
+        print("DEBUG: Exiting loop after condition is false")
         return (ExecStatus.CONTINUE, Interpreter.NIL_VALUE)
+
 
 
     def __do_return(self, return_ast):
@@ -589,31 +788,31 @@ class Interpreter(InterpreterBase):
     # function for exeucting raise statement
     def __do_raise(self, raise_ast):
         exception_type_ast = raise_ast.get("exception_type")
-        print(f"debug exception type is {exception_type_ast}")
+        print(f"DEBUG: Exception type AST: {exception_type_ast}")
         if exception_type_ast is None:
             super().error(ErrorType.NAME_ERROR, "Raise statement missing exception type!")
-
-        # eval excpetion type
-        error_value = self.__eval_expr(exception_type_ast)
-        print(f"errof value {error_value}")
-
-        # lazy value handling
-        if isinstance(error_value, Value) and error_value.is_lazy:
-            error_value = error_value.evaluate(self.evaluate_expression)
-
-        if error_value.type() != Type.STRING:
-            print("DEBUG: TYPE_ERROR in raise statement - value is not a string")
-            super().error(ErrorType.TYPE_ERROR, "Raised value not string!")
         
-        # propagate execption --> just like how we did return
-        #return (ExecStatus.EXCEPTION, error_value.value())
-        # Wrap exception in a Value object
-        #return (ExecStatus.EXCEPTION, Value(Type.STRING, error_value.value()))
-        return (ExecStatus.EXCEPTION, error_value)  # No need to wrap again
-    
+        # Evaluate the exception type
+        exception_type = self.__eval_expr(exception_type_ast)
+        print(f"DEBUG: Evaluated exception type: {exception_type}")
+
+        # Lazy value handling (if necessary)
+        if isinstance(exception_type, Value) and exception_type.is_lazy:
+            exception_type = exception_type.evaluate(self.evaluate_expression)
+
+        # Check if the raised value is a string
+        if exception_type.type() != Type.STRING:
+            print("DEBUG: TYPE_ERROR in raise statement - value is not a string")
+            super().error(ErrorType.TYPE_ERROR, "Raised value must be a string!")
+
+        # Propagate the exception
+        return (ExecStatus.EXCEPTION, exception_type)
+
+
+
     # function for try statement
     # try node is a statement node with elem_type 'try' and two keys in dictionary: 'statements' and 'catchers'
-    def __do_try(self, try_ast):
+    '''def __do_try(self, try_ast):
         # execute try block
         try_statements = try_ast.get("statements")
         print("DEBUG: Entering try block")
@@ -630,10 +829,10 @@ class Interpreter(InterpreterBase):
         print(f"DEBUG: Exception '{return_val}' caught in try block")
 
         # unwrap the exception if it's a Value object
-        if isinstance(return_val, Value) and return_val.type() == Type.STRING:
-            exception_type = return_val.value()
-        else:
-            exception_type = str(return_val)  # Fallback to raw exception value
+
+         # Handle exceptions
+        exception_type = return_val.value() if isinstance(return_val, Value) else str(return_val)
+
         
         # if exception, look for matching catcher
         for catch_node in try_ast.get("catchers"):
@@ -655,23 +854,64 @@ class Interpreter(InterpreterBase):
 
         # if no matching catcher, propagate exception
         #return (ExecStatus.EXCEPTION, exception_type)
+        return (ExecStatus.EXCEPTION, Value(Type.STRING, exception_type))'''
+    def __do_try(self, try_ast):
+        # execute the statements in the try block
+        try_statements = try_ast.get("statements")
+        print("DEBUG: Entering try block")
+        status, return_val = self.__run_statements(try_statements)
+
+        # if no exception occurred, return normally
+        if status != ExecStatus.EXCEPTION:
+            return (status, return_val)
+
+        # handle the exception if one occurred
+        print(f"DEBUG: Exception '{return_val}' caught in try block")
+        exception_type = return_val.value() if isinstance(return_val, Value) else str(return_val)
+
+        for catch_node in try_ast.get("catchers"):
+            if exception_type != catch_node.get("exception_type"):
+                continue  # skip to the next catch block
+
+            # execute the statements in the matched catch block
+            print(f"DEBUG: Exception '{exception_type}' matched with catch block")
+            self.env.push_block()  # create a new block for the catch scope
+            status, return_val = self.__run_statements(catch_node.get("statements"))
+            self.env.pop_block()
+
+            # ff another exception occurred within the catch block, propagate it
+            if status == ExecStatus.EXCEPTION:
+                return (status, return_val)
+
+            # return normally if the catch block handles everything
+            return (status, Interpreter.NIL_VALUE)
+
+        # if no matching catch block found, propagate the exception
+        if len(self.env.environment) == 1 and len(self.env.environment[0]) == 1:
+            # if at the top-level scope, raise a fault error
+            super().error(ErrorType.FAULT_ERROR, f"Unhandled exception: {exception_type}")
+
         return (ExecStatus.EXCEPTION, Value(Type.STRING, exception_type))
+
     
 
 def main():
     program_source = """
 func foo() {
-  raise "foo_cond_error";
+  raise "x";
+  print("foo");
+  return true;
 }
 
 func main() {
   try {
-     if (foo()) {
-       print("This will not execute");
-     }
+    var x;
+    for (x = 0; foo(); x = x + 1) {
+      print("asdf");
+    }
   }
-  catch "foo_cond_error" {
-    print("Caught foo_cond_error");
+  catch "x" {
+    print("x");
   }
 }
 
@@ -682,4 +922,3 @@ func main() {
 
 if __name__ == "__main__":
     main()
-

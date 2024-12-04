@@ -7,22 +7,28 @@ class EnvironmentManager:
         self.environment = []
 
     # returns a VariableDef object
-    def get(self, symbol):
+    def get(self, symbol, evaluator=None):
         cur_func_env = self.environment[-1]
         for env in reversed(cur_func_env):
             if symbol in env:
-                return env[symbol]
-
+                value = env[symbol]
+                if value.is_lazy and evaluator is not None:
+                    # Evaluate lazy value and update the environment
+                    evaluated_value = value.evaluate(evaluator)
+                    env[symbol] = evaluated_value  # Cache the evaluated value
+                    return evaluated_value
+                return value
         return None
 
     def set(self, symbol, value):
         cur_func_env = self.environment[-1]
         for env in reversed(cur_func_env):
             if symbol in env:
+                #print(f"DEBUG: Updated variable '{symbol}' with value: {value}")
                 env[symbol] = value
                 # print(f"DEBUG: Stored {symbol} as {value} (Lazy: {value.is_lazy})")  # Debugging
                 return True
-
+        #print(f"DEBUG: {symbol} not found for setting!")
         return False
 
     # create a new symbol in the top-most environment, regardless of whether that symbol exists
