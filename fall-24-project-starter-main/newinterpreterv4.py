@@ -92,27 +92,35 @@ class Interpreter(InterpreterBase):
         return self.__call_func_aux(func_name, actual_args)
 
     def __call_func_aux(self, func_name, actual_args):
+        # eagerly evaluate arguments for print/input, lazy for user-defined functions
+        if func_name in {"print", "inputi", "inputs"}:
+            evaluated_args = [self.evaluate_expression(arg) for arg in actual_args]
+        else:
+            evaluated_args = [
+                LazyValue(arg, self.env.snapshot(), self.evaluate_expression)
+                for arg in actual_args
+            ]
+        
         if func_name == "print":
-            return self.__call_print(actual_args)
+            return self.__call_print(evaluated_args)
         if func_name == "inputi" or func_name == "inputs":
-            return self.__call_input(func_name, actual_args)
+            return self.__call_input(func_name, evaluated_args)
 
+        # user defined function logic
         func_ast = self.__get_func_by_name(func_name, len(actual_args))
         formal_args = func_ast.get("args")
-        if len(actual_args) != len(formal_args):
+        '''if len(actual_args) != len(formal_args):
             super().error(
                 ErrorType.NAME_ERROR,
                 f"Function {func_ast.get('name')} with {len(actual_args)} args not found",
-            )
+            )'''
 
         # first evaluate all of the actual parameters and associate them with the formal parameter names
         args = {}
-        for formal_ast, actual_ast in zip(formal_args, actual_args):
-            result = copy.copy(self.__eval_expr(actual_ast))
-            arg_name = formal_ast.get("name")
-            args[arg_name] = result
+        for formal_arg, actual_arg in zip(formal_args, evaluated_args):
+            args[formal_arg.get("name")] = actual_arg 
 
-        # then create the new activation record 
+        # then create the new activation record ; push new function environemnt
         self.env.push_func()
         # and add the formal arguments to the activation record
         for arg_name, value in args.items():
@@ -124,14 +132,18 @@ class Interpreter(InterpreterBase):
     def __call_print(self, args):
         output = ""
         for arg in args:
-            result = self.__eval_expr(arg)  # result is a Value object
+            # Evaluate only if it's LazyValue; otherwise, use directly
+            if isinstance(arg, LazyValue):
+                result = arg.evaluate()
+            else:
+                result = arg
             output = output + get_printable(result)
         super().output(output)
         return Interpreter.NIL_VALUE
 
     def __call_input(self, name, args):
         if args is not None and len(args) == 1:
-            result = self.__eval_expr(args[0])
+            result = self.evaluate_expression(args[0])
             super().output(get_printable(result))
         elif args is not None and len(args) > 1:
             super().error(
@@ -145,8 +157,14 @@ class Interpreter(InterpreterBase):
 
     def __assign(self, assign_ast):
         var_name = assign_ast.get("name")
-        value_obj = self.__eval_expr(assign_ast.get("expression"))
-        if not self.env.set(var_name, value_obj):
+        expr_ast = assign_ast.get("expression")
+    
+        # capture environment snapshot and create a LazyValue
+        env_snapshot = self.env.snapshot()  # capture the current environment
+        lazy_value = LazyValue(expr_ast, env_snapshot, self.evaluate_expression)
+        
+        # store the LazyValue in the environment
+        if not self.env.set(var_name, lazy_value):
             super().error(
                 ErrorType.NAME_ERROR, f"Undefined variable {var_name} in assignment"
             )
@@ -157,6 +175,51 @@ class Interpreter(InterpreterBase):
             super().error(
                 ErrorType.NAME_ERROR, f"Duplicate definition for variable {var_name}"
             )
+
+    def evaluate_expression(self, ast_node, env_snapshot=None):
+        # If the node is already a LazyValue, evaluate it
+        if isinstance(ast_node, LazyValue):
+            return ast_node.evaluate()
+        
+        # eager evaluation -- an AST node in a specified environment or the current one
+        original_env = None
+        if env_snapshot is not None:
+            # Temporarily switch to the captured snapshot environment
+            original_env = self.env
+            self.env = EnvironmentManager()
+            self.env.environment = env_snapshot
+
+        try:
+            # Evaluate based on the type of AST node
+            if ast_node.elem_type == InterpreterBase.INT_NODE:
+                return Value(Type.INT, ast_node.get("val"))
+            if ast_node.elem_type == InterpreterBase.STRING_NODE:
+                return Value(Type.STRING, ast_node.get("val"))
+            if ast_node.elem_type == InterpreterBase.BOOL_NODE:
+                return Value(Type.BOOL, ast_node.get("val"))
+            if ast_node.elem_type == InterpreterBase.VAR_NODE:
+                var_name = ast_node.get("name")
+                val = self.env.get(var_name)
+                if val is None:
+                    super().error(ErrorType.NAME_ERROR, f"Variable {var_name} not found")
+                if isinstance(val, LazyValue):
+                    val = val.evaluate()
+                    self.env.set(var_name, val)  # Cache the evaluated value
+                return val
+            if ast_node.elem_type == InterpreterBase.FCALL_NODE:
+                return self.__call_func(ast_node)
+            if ast_node.elem_type in Interpreter.BIN_OPS:
+                return self.__eval_op(ast_node)
+            if ast_node.elem_type == Interpreter.NEG_NODE:
+                return self.__eval_unary(ast_node, Type.INT, lambda x: -1 * x)
+            if ast_node.elem_type == Interpreter.NOT_NODE:
+                return self.__eval_unary(ast_node, Type.BOOL, lambda x: not x)
+            super().error(ErrorType.TYPE_ERROR, "Unexpected AST node type")
+        finally:
+            if original_env is not None:
+                # Restore the original environment
+                self.env = original_env
+
 
     def __eval_expr(self, expr_ast):
         if expr_ast.elem_type == InterpreterBase.NIL_NODE:
@@ -172,6 +235,11 @@ class Interpreter(InterpreterBase):
             val = self.env.get(var_name)
             if val is None:
                 super().error(ErrorType.NAME_ERROR, f"Variable {var_name} not found")
+            # Check if the value is a LazyValue and evaluate it if needed
+            if isinstance(val, LazyValue):
+                evaluated_val = val.evaluate()
+                self.env.set(var_name, evaluated_val)  # Cache the evaluated value
+                return evaluated_val
             return val
         if expr_ast.elem_type == InterpreterBase.FCALL_NODE:
             return self.__call_func(expr_ast)
@@ -183,22 +251,43 @@ class Interpreter(InterpreterBase):
             return self.__eval_unary(expr_ast, Type.BOOL, lambda x: not x)
 
     def __eval_op(self, arith_ast):
-        left_value_obj = self.__eval_expr(arith_ast.get("op1"))
-        right_value_obj = self.__eval_expr(arith_ast.get("op2"))
-        if not self.__compatible_types(
-            arith_ast.elem_type, left_value_obj, right_value_obj
-        ):
+        # step 1:evaluate the left operand
+        left_value = self.__eval_expr(arith_ast.get("op1"))
+        if isinstance(left_value, LazyValue):
+            left_value = left_value.evaluate()
+
+        # step 2: handle logical short-circuiting
+        if arith_ast.elem_type == "||" and left_value.type() == Type.BOOL:
+            if left_value.value():  # Short-circuit for OR
+                return Value(Type.BOOL, True)
+
+        if arith_ast.elem_type == "&&" and left_value.type() == Type.BOOL:
+            if not left_value.value():  # Short-circuit for AND
+                return Value(Type.BOOL, False)
+
+        # step 3: evaluate the right operand
+        right_value = self.__eval_expr(arith_ast.get("op2"))
+        if isinstance(right_value, LazyValue):
+            right_value = right_value.evaluate()
+
+        # step 4: check type compatibility
+        if not self.__compatible_types(arith_ast.elem_type, left_value, right_value):
             super().error(
                 ErrorType.TYPE_ERROR,
                 f"Incompatible types for {arith_ast.elem_type} operation",
             )
-        if arith_ast.elem_type not in self.op_to_lambda[left_value_obj.type()]:
+
+        # step 5: ensure the operation is valid for the type
+        if arith_ast.elem_type not in self.op_to_lambda[left_value.type()]:
             super().error(
                 ErrorType.TYPE_ERROR,
-                f"Incompatible operator {arith_ast.elem_type} for type {left_value_obj.type()}",
+                f"Incompatible operator {arith_ast.elem_type} for type {left_value.type()}",
             )
-        f = self.op_to_lambda[left_value_obj.type()][arith_ast.elem_type]
-        return f(left_value_obj, right_value_obj)
+
+        # step 6: perform the operation
+        operation = self.op_to_lambda[left_value.type()][arith_ast.elem_type]
+        return operation(left_value, right_value)
+
 
     def __compatible_types(self, oper, obj1, obj2):
         # DOCUMENT: allow comparisons ==/!= of anything against anything
@@ -208,6 +297,9 @@ class Interpreter(InterpreterBase):
 
     def __eval_unary(self, arith_ast, t, f):
         value_obj = self.__eval_expr(arith_ast.get("op1"))
+        # Evaluate the value if it's lazy
+        if isinstance(value_obj, LazyValue):
+            value_obj = value_obj.evaluate()
         if value_obj.type() != t:
             super().error(
                 ErrorType.TYPE_ERROR,
@@ -287,6 +379,8 @@ class Interpreter(InterpreterBase):
     def __do_if(self, if_ast):
         cond_ast = if_ast.get("condition")
         result = self.__eval_expr(cond_ast)
+        if isinstance(result, LazyValue):
+            result = result.evaluate()
         if result.type() != Type.BOOL:
             super().error(
                 ErrorType.TYPE_ERROR,
@@ -305,31 +399,63 @@ class Interpreter(InterpreterBase):
         return (ExecStatus.CONTINUE, Interpreter.NIL_VALUE)
 
     def __do_for(self, for_ast):
-        init_ast = for_ast.get("init") 
+        init_ast = for_ast.get("init")
         cond_ast = for_ast.get("condition")
-        update_ast = for_ast.get("update") 
+        update_ast = for_ast.get("update")
 
-        self.__run_statement(init_ast)  # initialize counter variable
-        run_for = Interpreter.TRUE_VALUE
-        while run_for.value():
-            run_for = self.__eval_expr(cond_ast)  # check for-loop condition
-            if run_for.type() != Type.BOOL:
+        # step 1: initialize the loop variable
+        self.__run_statement(init_ast)
+
+        while True:
+            # step 2: evaluate the loop condition
+            condition_value = self.__eval_expr(cond_ast)
+
+            # step 3: handle lazy evaluation
+            if isinstance(condition_value, LazyValue):
+                condition_value = condition_value.evaluate()
+
+            # step 4: ensure the condition evaluates to a boolean
+            if condition_value.type() != Type.BOOL:
                 super().error(
                     ErrorType.TYPE_ERROR,
-                    "Incompatible type for for condition",
+                    "Condition must evaluate to a boolean in for loop",
                 )
-            if run_for.value():
-                statements = for_ast.get("statements")
-                status, return_val = self.__run_statements(statements)
-                if status == ExecStatus.RETURN:
-                    return status, return_val
-                self.__run_statement(update_ast)  # update counter variable
+
+            # step 5: check the condition's value
+            if not condition_value.value():  # Exit the loop if condition is False
+                break
+
+            # step 6: execute the loop body
+            status, return_val = self.__run_statements(for_ast.get("statements"))
+            if status == ExecStatus.RETURN:
+                return (status, return_val)
+
+            # step 7: update the loop variable
+            self.__run_statement(update_ast)
 
         return (ExecStatus.CONTINUE, Interpreter.NIL_VALUE)
+
 
     def __do_return(self, return_ast):
         expr_ast = return_ast.get("expression")
         if expr_ast is None:
             return (ExecStatus.RETURN, Interpreter.NIL_VALUE)
-        value_obj = copy.copy(self.__eval_expr(expr_ast))
-        return (ExecStatus.RETURN, value_obj)
+        # Create a LazyValue for the return expression
+        lazy_value = LazyValue(expr_ast, self.env.snapshot(), self.evaluate_expression)
+        return (ExecStatus.RETURN, lazy_value)
+
+
+def main():
+    program_source = """
+func main() {
+ var a;
+ a = "a" <= "b";
+ print("---");
+ print(a);
+}
+    """
+    interpreter = Interpreter()
+    interpreter.run(program_source)
+
+if __name__ == "__main__":
+    main()

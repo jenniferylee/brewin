@@ -30,10 +30,14 @@ class LazyValue:
         self.is_evaluated = False # to check if already evalauted --> for need semantics
  
     def evaluate(self):
-        if not self.is_evaluated:
-            # evaluate the AST node in the captured environment
-            self.cached_value = self.evaluator(self.ast_node, self.env_snapshot)
-            self.is_evaluated = True
+        # evaluates the expression if it has not been evaluated yet and caches the result for future use.
+        if self.is_evaluated:
+            return self.cached_value
+        
+        # Use the evaluator to compute the value
+        self.cached_value = self.evaluator(self.ast_node, self.env_snapshot)
+        self.is_evaluated = True
+        
         return self.cached_value
 
 
